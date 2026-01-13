@@ -4,7 +4,10 @@
 
 ## Features
 
-- 📂 **Local File Access**: The agent can read files and list directories to understand your codebase.
+- 📂 **Local File Access**: The agent can read files, list directories, and now **write files** (`write_file`) to modify your codebase.
+- 💻 **Shell Execution**: Run shell commands (`run_shell`) directly (e.g., git commands, builds).
+- 📝 **Action Logging**: All user interactions and agent responses are logged locally using MapDB for history and auditability.
+- 📜 **Log Retrieval**: The agent can retrieve past interaction logs using the `get_action_logs` tool.
 - 🌐 **Web Research**: Perform Google searches using built-in grounding.
 - 🔗 **URL Lookup**: Fetch and extract text from specific URLs (documentation, blogs, etc.) using the `fetch_url` tool.
 - 🚀 **Native Executable**: Runs as a standalone `.exe` on Windows (via Launch4j).
@@ -30,7 +33,7 @@ mvn clean package
 ```
 
 The output will be generated in the `target/` directory:
-- `target/mkpro-1.3-SNAPSHOT.jar` (Fat JAR)
+- `target/mkpro-1.4-SNAPSHOT.jar` (Fat JAR)
 - `target/mkpro.exe` (Native Windows Executable)
 
 ## Running
@@ -42,7 +45,7 @@ The output will be generated in the `target/` directory:
 
 ### Using Java
 ```bash
-java -jar target/mkpro-1.1-SNAPSHOT-shaded.jar
+java -jar target/mkpro-1.4-SNAPSHOT-shaded.jar
 ```
 
 ## Usage Examples
@@ -50,10 +53,12 @@ java -jar target/mkpro-1.1-SNAPSHOT-shaded.jar
 Once the `> ` prompt appears, you can try:
 
 - **Analyze Code**: "Read src/main/java/com/mkpro/MkPro.java and explain how the tools are registered."
+- **Modify Code**: "Add a comment to the main method in MkPro.java explaining it's the entry point." (The agent will use `git` to save state before modifying).
 - **Project Overview**: "List the files in the current directory."
+- **Check History**: "Show me the logs of what we've done so far."
 - **Research**: "Search for the latest features in Gemini 2.0."
 - **Read Documentation**: "Read this page and summarize the main points: https://google.github.io/adk-docs/"
 
 ## Maintenance
 
-The agent configuration is located in `src/main/java/com/mkpro/MkPro.java`. You can modify the system instructions or add new tools there.
+The agent configuration is located in `src/main/java/com/mkpro/MkPro.java`. You can modify the system instructions or add new tools there. Logs are stored in `mkpro_logs.db`.
