@@ -379,6 +379,7 @@ public class MkPro {
                 .description("A helpful coding and research assistant.")
                 .instruction("You are mkpro, a powerful coding assistant. "
                         + "You have access to the local filesystem AND the internet. "
+                        + "You can also ANALYZE IMAGES if provided with a file path. "
                         + "TOOLS AVAILABLE:\n"
                         + "- read_file: Read local files.\n"
                         + "- write_file: Create or overwrite files.\n"
@@ -429,9 +430,35 @@ public class MkPro {
 
             logger.log("USER", line);
 
+            java.util.List<Part> parts = new java.util.ArrayList<>();
+            parts.add(Part.fromText(line));
+
+            // Detect image paths in the input
+            String[] tokens = line.split("\\s+");
+            for (String token : tokens) {
+                String lowerToken = token.toLowerCase();
+                if (lowerToken.endsWith(".jpg") || lowerToken.endsWith(".jpeg") || 
+                    lowerToken.endsWith(".png") || lowerToken.endsWith(".webp")) {
+                    try {
+                        Path imagePath = Paths.get(token);
+                        if (Files.exists(imagePath)) {
+                            if (verbose) System.out.println("[DEBUG] Feeding image to agent: " + token);
+                            byte[] imageBytes = Files.readAllBytes(imagePath);
+                            String mimeType = "image/jpeg";
+                            if (lowerToken.endsWith(".png")) mimeType = "image/png";
+                            else if (lowerToken.endsWith(".webp")) mimeType = "image/webp";
+                            
+                            parts.add(Part.fromBytes(imageBytes, mimeType));
+                        }
+                    } catch (Exception e) {
+                        if (verbose) System.err.println("Warning: Could not read image file " + token + ": " + e.getMessage());
+                    }
+                }
+            }
+
             Content content = Content.builder()
                     .role("user")
-                    .parts(Collections.singletonList(Part.builder().text(line).build()))
+                    .parts(parts)
                     .build();
 
             try {
