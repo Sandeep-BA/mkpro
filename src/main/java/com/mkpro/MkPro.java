@@ -31,25 +31,41 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.LoggerFactory;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 
 public class MkPro {
 
     public static void main(String[] args) {
-        System.out.println("Initializing mkpro assistant...");
-        
+        // Check for flags
+        boolean useUI = false;
+        boolean verbose = false;
+        for (String arg : args) {
+            if ("-ui".equalsIgnoreCase(arg) || "--companion".equalsIgnoreCase(arg)) {
+                useUI = true;
+            } else if ("-v".equalsIgnoreCase(arg) || "--verbose".equalsIgnoreCase(arg)) {
+                verbose = true;
+            }
+        }
+
+        final boolean isVerbose = verbose;
+
+        if (isVerbose) {
+            System.out.println("Initializing mkpro assistant...");
+            Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+            root.setLevel(Level.DEBUG);
+        } else {
+             // Ensure it stays at WARN (or whatever logback.xml said) unless we want to force it.
+             // But logback.xml handles the default.
+             // We can optionally force OFF if we want it *really* quiet.
+             // For now, let's respect logback.xml (WARN).
+        }
+
         String apiKey = System.getenv("GOOGLE_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
             System.err.println("Error: GOOGLE_API_KEY environment variable not set.");
             System.exit(1);
-        }
-
-        // Check for UI flag
-        boolean useUI = false;
-        for (String arg : args) {
-            if ("-ui".equalsIgnoreCase(arg) || "--companion".equalsIgnoreCase(arg)) {
-                useUI = true;
-                break;
-            }
         }
 
         InMemorySessionService sessionService = new InMemorySessionService();
@@ -81,7 +97,7 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: read_file");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: read_file");
                 String filePath = (String) args.get("file_path");
                 try {
                     Path path = Paths.get(filePath);
@@ -124,7 +140,7 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: list_directory");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: list_directory");
                 String dirPath = (String) args.get("dir_path");
                 try {
                      Path path = Paths.get(dirPath);
@@ -178,11 +194,11 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: fetch_url");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: fetch_url");
                 String url = (String) args.get("url");
                 return Single.fromCallable(() -> {
                     try {
-                        System.out.println("[DEBUG] Fetching URL: " + url);
+                        if (isVerbose) System.out.println("[DEBUG] Fetching URL: " + url);
                         HttpRequest request = HttpRequest.newBuilder()
                                 .uri(URI.create(url))
                                 .timeout(Duration.ofSeconds(20))
@@ -244,7 +260,7 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: write_file");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: write_file");
                 String filePath = (String) args.get("file_path");
                 String content = (String) args.get("content");
                 return Single.fromCallable(() -> {
@@ -287,7 +303,7 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: run_shell");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: run_shell");
                 String command = (String) args.get("command");
                 return Single.fromCallable(() -> {
                     try {
@@ -343,7 +359,7 @@ public class MkPro {
 
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
-                System.out.println("[DEBUG] Tool invoked: get_action_logs");
+                if (isVerbose) System.out.println("[DEBUG] Tool invoked: get_action_logs");
                 return Single.fromCallable(() -> {
                     try {
                         StringBuilder logsBuilder = new StringBuilder();
@@ -388,18 +404,20 @@ public class MkPro {
                 .build();
 
         if (useUI) {
-            System.out.println("Launching Swing Companion UI...");
+            if (isVerbose) System.out.println("Launching Swing Companion UI...");
             SwingCompanion gui = new SwingCompanion(runner, session, sessionService);
             gui.show();
         } else {
-            runConsoleLoop(runner, session, logger);
+            runConsoleLoop(runner, session, logger, isVerbose);
         }
         
         logger.close();
     }
 
-    private static void runConsoleLoop(Runner runner, Session session, ActionLogger logger) {
-        System.out.println("mkpro ready! Type 'exit' to quit.");
+    private static void runConsoleLoop(Runner runner, Session session, ActionLogger logger, boolean verbose) {
+        if (verbose) {
+            System.out.println("mkpro ready! Type 'exit' to quit.");
+        }
         System.out.print("> ");
 
         Scanner scanner = new Scanner(System.in);
@@ -435,13 +453,15 @@ public class MkPro {
                 logger.log("AGENT", responseBuilder.toString());
             } catch (Exception e) {
                 System.err.println("Error processing request: " + e.getMessage());
-                e.printStackTrace();
+                if (verbose) {
+                    e.printStackTrace();
+                }
                 logger.log("ERROR", e.getMessage());
             }
 
             System.out.print("> ");
         }
         
-        System.out.println("Goodbye!");
+        if (verbose) System.out.println("Goodbye!");
     }
 }
