@@ -106,6 +106,8 @@ public class MkPro {
         InMemorySessionService sessionService = new InMemorySessionService();
         InMemoryArtifactService artifactService = new InMemoryArtifactService();
         InMemoryMemoryService memoryService = new InMemoryMemoryService();
+        
+        CentralMemory centralMemory = new CentralMemory();
 
         // Define File Tool
         BaseTool readFileTool = new BaseTool(
@@ -459,6 +461,80 @@ public class MkPro {
             }
         };
 
+        // Define Save Central Memory Tool
+        BaseTool saveMemoryTool = new BaseTool(
+                "save_central_memory",
+                "Saves a summary or memory of the current project to the user's central database. Use this to persist long-term knowledge."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "content", Schema.builder()
+                                                .type("STRING")
+                                                .description("The summary content to save.")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("content"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String content = (String) args.get("content");
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                System.out.println(ANSI_BLUE + "[Tool] Saving to central memory for: " + currentPath + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        centralMemory.saveMemory(currentPath, content);
+                        return Collections.singletonMap("status", "Memory saved successfully for " + currentPath);
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Error saving memory: " + e.getMessage());
+                    }
+                });
+            }
+        };
+
+        // Define Read Central Memory Tool
+        BaseTool readMemoryTool = new BaseTool(
+                "read_central_memory",
+                "Reads the stored memory for the current project from the central database."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(Collections.emptyMap())
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                System.out.println(ANSI_BLUE + "[Tool] Reading central memory for: " + currentPath + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        String memory = centralMemory.getMemory(currentPath);
+                        if (memory == null) {
+                            return Collections.singletonMap("memory", "No memory found for this project.");
+                        }
+                        return Collections.singletonMap("memory", memory);
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Error reading memory: " + e.getMessage());
+                    }
+                });
+            }
+        };
+
         // Collection of tools
         List<BaseTool> tools = new ArrayList<>();
         tools.add(readFileTool);
@@ -468,6 +544,8 @@ public class MkPro {
         tools.add(listDirTool);
         tools.add(urlFetchTool);
         tools.add(getActionLogsTool);
+        tools.add(saveMemoryTool);
+        tools.add(readMemoryTool);
 
         // Factory to create Runner with specific model
         Function<String, Runner> runnerFactory = (currentModelName) -> {
@@ -510,13 +588,13 @@ public class MkPro {
             SwingCompanion gui = new SwingCompanion(runner, session, sessionService);
             gui.show();
         } else {
-            runConsoleLoop(runnerFactory, modelName, session, sessionService, logger, isVerbose);
+            runConsoleLoop(runnerFactory, modelName, session, sessionService, centralMemory, logger, isVerbose);
         }
         
         logger.close();
     }
 
-    private static void runConsoleLoop(Function<String, Runner> runnerFactory, String initialModelName, Session initialSession, InMemorySessionService sessionService, ActionLogger logger, boolean verbose) {
+    private static void runConsoleLoop(Function<String, Runner> runnerFactory, String initialModelName, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
         String currentModelName = initialModelName;
         Runner runner = runnerFactory.apply(currentModelName);
         Session currentSession = initialSession;
@@ -540,12 +618,38 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "Available Commands:" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /models     - List available local Ollama models." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change the current Ollama model." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /init       - Initialize project memory (if not exists)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize/Update project memory." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /remember   - Analyze project and save summary to central memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /reset      - Reset the session (clears memory)." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /compact    - Compact the session (summarize history and start fresh)." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /summarize  - Generate a summary of the session to 'session_summary.txt'." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  exit        - Quit the application." + ANSI_RESET);
                 System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
+            }
+
+            if ("/init".equalsIgnoreCase(line.trim())) {
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                String existing = centralMemory.getMemory(currentPath);
+                if (existing != null && !existing.isBlank()) {
+                    System.out.println(ANSI_BLUE + "Project already initialized in central memory." + ANSI_RESET);
+                    System.out.println(ANSI_BLUE + "Use '/re-init' to force a fresh summary." + ANSI_RESET);
+                    System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                    continue;
+                }
+                line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
+                System.out.println(ANSI_BLUE + "System: Initializing project memory..." + ANSI_RESET);
+            }
+
+            if ("/re-init".equalsIgnoreCase(line.trim())) {
+                 line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
+                 System.out.println(ANSI_BLUE + "System: Re-initializing project memory..." + ANSI_RESET);
+            }
+
+            if ("/remember".equalsIgnoreCase(line.trim())) {
+                 line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
+                 System.out.println(ANSI_BLUE + "System: Initiating project analysis and memory storage..." + ANSI_RESET);
             }
 
             if ("/models".equalsIgnoreCase(line.trim())) {
