@@ -1,20 +1,22 @@
 # mkpro - AI Coding & Research Assistant
 
-`mkpro` is a sophisticated CLI-based AI assistant built using the Google Agent Development Kit (ADK). It features a multi-agent architecture and supports local models (via Ollama) and cloud models (via Gemini API and AWS Bedrock).
+`mkpro` is a sophisticated CLI-based AI assistant built using the Google Agent Development Kit (ADK). It features a modular multi-agent architecture and supports local models (via Ollama) and cloud models (via Gemini API and AWS Bedrock).
 
 ## Features
 
-- 🤖 **Multi-Agent Architecture**:
+- 🤖 **Expanded Multi-Agent Team**:
     - **Coordinator**: Orchestrates the workflow, performs research, and manages long-term memory.
     - **Coder**: Specialized in reading/writing files and analyzing project structure.
     - **SysAdmin**: Handles shell command execution and system-level tasks.
-- 🏢 **Central Memory**: Persist project summaries across sessions in a central database located in your home directory (`~/.mkpro/central_memory.db`).
+    - **Tester**: Dedicated to writing and running unit tests to ensure code quality.
+    - **DocWriter**: specialized in writing, updating, and maintaining project documentation.
+- ⚙️ **Granular & Persistent Configuration**: Configure each agent independently (e.g., use Claude for coding, Gemini for docs, and Llama 3 for coordination). Settings are saved to `~/.mkpro/central_memory.db` and persist across sessions.
+- 🏢 **Central Memory**: Persist project summaries and agent configurations across sessions.
 - 🌐 **Multi-Provider Support**: Seamlessly switch between **Ollama** (local), **Gemini** (Google Cloud), and **Bedrock** (AWS) providers.
 - 📂 **Local File Access**: Full capability to read and modify your codebase safely.
 - 💻 **Shell Execution**: Run shell commands directly with automatic state saving via Git.
 - 🖼️ **Image Analysis**: Analyze local image files by referencing them in your prompts.
 - 📅 **Context Aware**: Agents are automatically aware of the current date and working directory.
-- 🔄 **Context Management**: Reset or compact sessions to manage the LLM's context window effectively.
 
 ## Prerequisites
 
@@ -28,7 +30,7 @@
 
 1. **Configure Providers**:
    - **Gemini**: `set GOOGLE_API_KEY=your_api_key`
-   - **Bedrock**: Use `aws configure` or set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` environment variables.
+   - **Bedrock**: Use `aws configure` or set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION`.
    - **Ollama**: Ensure the local daemon is running.
 
 ## Building
@@ -60,13 +62,15 @@ java -jar target/mkpro-1.4-SNAPSHOT-shaded.jar
 Inside the CLI, you can use the following commands:
 
 - **/help** (or **/h**): Display available commands.
-- **/provider**: Interactively switch between **OLLAMA**, **GEMINI**, and **BEDROCK** providers.
-- **/models**: List models available for the active provider.
-- **/model**: Select a model numerically (current model is marked as default).
-- **/init**: Initialize project memory in the central database (if not already present).
-- **/re-init**: Refresh/Update the project summary in the central database.
+- **/config**: **(New)** Interactive menu to configure the provider and model for any agent. Can also be used as `/config <Agent> <Provider> <Model>`.
+- **/status**: **(New)** Show a detailed table of all agent configurations and memory system status.
+- **/provider**: Quick switch for the **Coordinator**'s provider.
+- **/models**: List models available for the Coordinator's active provider.
+- **/model**: Quick switch for the **Coordinator**'s model.
+- **/init**: Initialize project memory in the central database.
+- **/re-init**: Refresh the project summary in the central database.
 - **/remember**: Manually trigger a project analysis and save to central memory.
-- **/compact**: Summarize current history and start a fresh session with that summary (saves tokens).
+- **/compact**: Summarize current history and start a fresh session (saves tokens).
 - **/reset**: Clear the current session memory entirely.
 - **/summarize**: Export a session summary to `session_summary.txt`.
 - **exit**: Quit the application.
@@ -75,13 +79,19 @@ Inside the CLI, you can use the following commands:
 
 Once the `> ` prompt appears, you can try:
 
+- **Configure Team**: Type `/config` to interactively set the *Coder* to use `GEMINI` and the *SysAdmin* to use `OLLAMA`.
 - **Initialize Project**: `/init` (Let the agents learn your project structure).
-- **Coding Task**: "Add a logger to the main method in MkPro.java."
-- **System Task**: "Run a maven build and tell me if it passes."
-- **Multi-Agent delegation**: The Coordinator will automatically ask the Coder to read files and the SysAdmin to run tests.
-- **Recall Memory**: "What do you know about other projects in my central store?"
-- **Switch Models**: `/provider` followed by `/model` to try different LLMs across providers.
+- **Coding Task**: "Add a logger to the main method in MkPro.java." (Delegates to Coder).
+- **Testing Task**: "Write a unit test for the new logger." (Delegates to Tester).
+- **Documentation**: "Update the README to include the new features." (Delegates to DocWriter).
+- **Check Status**: Type `/status` to see your team's configuration.
 
 ## Maintenance
 
-The agent configuration and system prompts are located in `src/main/java/com/mkpro/MkPro.java`. Interaction logs are stored in `mkpro_logs.db`.
+The project is now modularized:
+- `com.mkpro.MkPro`: Main entry point and command loop.
+- `com.mkpro.agents`: Agent management and delegation logic.
+- `com.mkpro.tools`: Tool definitions.
+- `com.mkpro.models`: Configuration data classes.
+- `mkpro_logs.db`: Interaction logs.
+- `~/.mkpro/central_memory.db`: Persistent memory and configuration storage.
