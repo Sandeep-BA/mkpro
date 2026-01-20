@@ -53,6 +53,35 @@ public class MkPro {
         GEMINI,
         BEDROCK
     }
+
+    private static class AgentConfig {
+        Provider provider;
+        String modelName;
+
+        public AgentConfig(Provider provider, String modelName) {
+            this.provider = provider;
+            this.modelName = modelName;
+        }
+    }
+
+    // Helper class to pass data to subAgentRunner
+    private static class AgentRequest {
+        String agentName;
+        String instruction;
+        String modelName;
+        Provider provider;
+        String userPrompt;
+        List<BaseTool> tools;
+
+        public AgentRequest(String agentName, String instruction, String modelName, Provider provider, String userPrompt, List<BaseTool> tools) {
+            this.agentName = agentName;
+            this.instruction = instruction;
+            this.modelName = modelName;
+            this.provider = provider;
+            this.userPrompt = userPrompt;
+            this.tools = tools;
+        }
+    }
     
     private static final List<String> GEMINI_MODELS = Arrays.asList(
         "gemini-2.0-flash",
@@ -645,18 +674,19 @@ public class MkPro {
         // We will move tool creation into the factory to capture 'currentModelName'
 
         // Factory to create Runner with specific model
-        BiFunction<String, Provider, Runner> runnerFactory = (currentModelName, currentProvider) -> {
+        Function<Map<String, AgentConfig>, Runner> runnerFactory = (agentConfigs) -> {
             
             String contextInfo = "\nCurrent Date: " + LocalDate.now() + "\nCurrent Working Directory: " + Paths.get("").toAbsolutePath().toString();
 
-            // Model selection logic
+            // Coordinator Model
+            AgentConfig coordConfig = agentConfigs.get("Coordinator");
             BaseLlm model;
-            if (currentProvider == Provider.GEMINI) {
-                model = new Gemini(currentModelName, apiKey);
-            } else if (currentProvider == Provider.BEDROCK) {
-                model = new BedrockBaseLM(currentModelName, null);
+            if (coordConfig.provider == Provider.GEMINI) {
+                model = new Gemini(coordConfig.modelName, apiKey);
+            } else if (coordConfig.provider == Provider.BEDROCK) {
+                model = new BedrockBaseLM(coordConfig.modelName, null);
             } else {
-                model = new OllamaBaseLM(currentModelName, "http://localhost:11434");
+                model = new OllamaBaseLM(coordConfig.modelName, "http://localhost:11434");
             }
 
             // --- Re-define Delegation Tools to capture currentModelName ---
@@ -684,6 +714,7 @@ public class MkPro {
                 public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
                     String instruction = (String) args.get("instruction");
                     System.out.println(ANSI_BLUE + ">> Delegating to Coder..." + ANSI_RESET);
+                    AgentConfig coderConfig = agentConfigs.get("Coder");
                     return Single.fromCallable(() -> {
                         String result = subAgentRunner.apply(new AgentRequest(
                             "Coder", 
@@ -692,8 +723,8 @@ public class MkPro {
                             "You CANNOT execute shell commands directly. " +
                             "Perform the requested task and provide a concise report." +
                             contextInfo,
-                            currentModelName,
-                            currentProvider,
+                            coderConfig.modelName,
+                            coderConfig.provider,
                             instruction,
                             List.of(readFileTool, writeFileTool, listDirTool, readImageTool)
                         ));
@@ -725,6 +756,7 @@ public class MkPro {
                 public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
                     String instruction = (String) args.get("instruction");
                     System.out.println(ANSI_BLUE + ">> Delegating to SysAdmin..." + ANSI_RESET);
+                    AgentConfig sysAdminConfig = agentConfigs.get("SysAdmin");
                     return Single.fromCallable(() -> {
                         String result = subAgentRunner.apply(new AgentRequest(
                             "SysAdmin", 
@@ -732,10 +764,94 @@ public class MkPro {
                             "You specialize in executing shell commands safely. " +
                             "You can use 'run_shell'. Execute the requested commands and report the output." +
                             contextInfo,
-                            currentModelName,
-                            currentProvider,
+                            sysAdminConfig.modelName,
+                            sysAdminConfig.provider,
                             instruction,
                             List.of(runShellTool)
+                        ));
+                        return Collections.singletonMap("result", result);
+                    });
+                }
+            };
+
+            BaseTool scopedAskTesterTool = new BaseTool(
+                "ask_tester",
+                "Delegates testing tasks to the QA/Tester agent (write/run tests)."
+            ) {
+                @Override
+                public Optional<FunctionDeclaration> declaration() {
+                    return Optional.of(FunctionDeclaration.builder()
+                            .name(name())
+                            .description(description())
+                            .parameters(Schema.builder()
+                                    .type("OBJECT")
+                                    .properties(ImmutableMap.of(
+                                            "instruction", Schema.builder().type("STRING").description("Instructions for the Tester.").build()
+                                    ))
+                                    .required(ImmutableList.of("instruction"))
+                                    .build())
+                            .build());
+                }
+
+                @Override
+                public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                    String instruction = (String) args.get("instruction");
+                    System.out.println(ANSI_BLUE + ">> Delegating to Tester..." + ANSI_RESET);
+                    AgentConfig testerConfig = agentConfigs.get("Tester");
+                    return Single.fromCallable(() -> {
+                        String result = subAgentRunner.apply(new AgentRequest(
+                            "Tester", 
+                            "You are the QA / Tester Agent. " +
+                            "Your goal is to ensure code quality. " +
+                            "You can read/write files (to create tests) and run shell commands (to execute test runners). " +
+                            "Always analyze the code first, then write a test case, then run it. Report the results." +
+                            contextInfo,
+                            testerConfig.modelName,
+                            testerConfig.provider,
+                            instruction,
+                            List.of(readFileTool, writeFileTool, listDirTool, runShellTool)
+                        ));
+                        return Collections.singletonMap("result", result);
+                    });
+                }
+            };
+
+            BaseTool scopedAskDocWriterTool = new BaseTool(
+                "ask_doc_writer",
+                "Delegates documentation tasks to the DocWriter agent (read code, write docs)."
+            ) {
+                @Override
+                public Optional<FunctionDeclaration> declaration() {
+                    return Optional.of(FunctionDeclaration.builder()
+                            .name(name())
+                            .description(description())
+                            .parameters(Schema.builder()
+                                    .type("OBJECT")
+                                    .properties(ImmutableMap.of(
+                                            "instruction", Schema.builder().type("STRING").description("Instructions for the DocWriter.").build()
+                                    ))
+                                    .required(ImmutableList.of("instruction"))
+                                    .build())
+                            .build());
+                }
+
+                @Override
+                public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                    String instruction = (String) args.get("instruction");
+                    System.out.println(ANSI_BLUE + ">> Delegating to DocWriter..." + ANSI_RESET);
+                    AgentConfig docWriterConfig = agentConfigs.get("DocWriter");
+                    return Single.fromCallable(() -> {
+                        String result = subAgentRunner.apply(new AgentRequest(
+                            "DocWriter", 
+                            "You are the Documentation Writer. " +
+                            "Your goal is to maintain project documentation. " +
+                            "You can read codebase structure and files, and write documentation (README.md, Javadocs, etc.). " +
+                            "You do NOT run code. Focus on clarity, accuracy, and keeping docs in sync with code." +
+                            contextInfo,
+                            docWriterConfig.modelName,
+                            docWriterConfig.provider,
+                            instruction,
+                            List.of(readFileTool, writeFileTool, listDirTool)
                         ));
                         return Collections.singletonMap("result", result);
                     });
@@ -746,6 +862,8 @@ public class MkPro {
             List<BaseTool> coordinatorTools = new ArrayList<>();
             coordinatorTools.add(scopedAskCoderTool);
             coordinatorTools.add(scopedAskSysAdminTool);
+            coordinatorTools.add(scopedAskTesterTool);
+            coordinatorTools.add(scopedAskDocWriterTool);
             coordinatorTools.add(urlFetchTool);
             coordinatorTools.add(getActionLogsTool);
             coordinatorTools.add(saveMemoryTool);
@@ -757,9 +875,11 @@ public class MkPro {
                 .name("Coordinator")
                 .description("The main orchestrator agent.")
                 .instruction("You are the Coordinator. You interface with the user and manage the workflow. "
-                        + "You have two specialized sub-agents: \n" 
+                        + "You have four specialized sub-agents: \n" 
                         + "1. **Coder**: Handles all file operations (read, write, analyze images). \n" 
                         + "2. **SysAdmin**: Handles all shell command executions. \n" 
+                        + "3. **Tester**: specialized in writing and running unit tests. \n" 
+                        + "4. **DocWriter**: specialized in writing and updating documentation (README, Javadocs). \n" 
                         + "Delegate tasks appropriately. Do not try to write files or run commands yourself; you don't have those tools. " 
                         + "You DO have tools to fetch URLs and manage long-term memory. " 
                         + "Always prefer concise answers."
@@ -782,7 +902,16 @@ public class MkPro {
         if (useUI) {
             if (isVerbose) System.out.println(ANSI_BLUE + "Launching Swing Companion UI..." + ANSI_RESET);
             // UI uses initial model, defaults to OLLAMA for now unless arg changes (TODO: add arg for provider)
-            Runner runner = runnerFactory.apply(modelName, Provider.OLLAMA);
+            // Need to wrap config in map for UI too if we want full parity, but simpler to adapt factory or hardcode for UI for now.
+            // But runnerFactory now expects Map.
+            Map<String, AgentConfig> uiConfigs = new java.util.HashMap<>();
+            uiConfigs.put("Coordinator", new AgentConfig(Provider.OLLAMA, modelName));
+            uiConfigs.put("Coder", new AgentConfig(Provider.OLLAMA, modelName));
+            uiConfigs.put("SysAdmin", new AgentConfig(Provider.OLLAMA, modelName));
+            uiConfigs.put("Tester", new AgentConfig(Provider.OLLAMA, modelName));
+            uiConfigs.put("DocWriter", new AgentConfig(Provider.OLLAMA, modelName));
+            
+            Runner runner = runnerFactory.apply(uiConfigs);
             SwingCompanion gui = new SwingCompanion(runner, mkSession, sessionService);
             gui.show();
         } else {
@@ -794,29 +923,17 @@ public class MkPro {
         // centralMemory.close(); // removed as it is not Closeable
     }
 
-    // Helper class to pass data to subAgentRunner
-    private static class AgentRequest {
-        String agentName;
-        String instruction;
-        String modelName;
-        Provider provider;
-        String userPrompt;
-        List<BaseTool> tools;
+    private static void runConsoleLoop(Function<Map<String, AgentConfig>, Runner> runnerFactory, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose, String apiKey) {
+        // Initialize default configs for all agents
+        Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
+        
+        agentConfigs.put("Coordinator", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("Coder", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("SysAdmin", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("Tester", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("DocWriter", new AgentConfig(initialProvider, initialModelName));
 
-        public AgentRequest(String agentName, String instruction, String modelName, Provider provider, String userPrompt, List<BaseTool> tools) {
-            this.agentName = agentName;
-            this.instruction = instruction;
-            this.modelName = modelName;
-            this.provider = provider;
-            this.userPrompt = userPrompt;
-            this.tools = tools;
-        }
-    }
-
-    private static void runConsoleLoop(BiFunction<String, Provider, Runner> runnerFactory, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose, String apiKey) {
-        String currentModelName = initialModelName;
-        Provider currentProvider = initialProvider;
-        Runner runner = runnerFactory.apply(currentModelName, currentProvider);
+        Runner runner = runnerFactory.apply(agentConfigs);
         Session currentSession = initialSession;
         
         if (verbose) {
@@ -836,9 +953,11 @@ public class MkPro {
 
             if ("/h".equalsIgnoreCase(line.trim()) || "/help".equalsIgnoreCase(line.trim())) {
                 System.out.println(ANSI_BLUE + "Available Commands:" + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /provider   - Switch between OLLAMA, GEMINI, and BEDROCK providers." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /models     - List available models (for current provider)." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /model      - Change the current model." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /config     - Configure a specific agent (e.g., '/config Coder GEMINI gemini-1.5-pro')." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider (shortcut)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /models     - List available models (for Coordinator's provider)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /model      - Change Coordinator model (shortcut)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /status     - Show current configuration for all agents." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /init       - Initialize project memory (if not exists)." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize/Update project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /remember   - Analyze project and save summary to central memory." + ANSI_RESET);
@@ -849,10 +968,60 @@ public class MkPro {
                 System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
+            
+            if ("/status".equalsIgnoreCase(line.trim())) {
+                System.out.println(ANSI_BLUE + "Current Agent Configuration:" + ANSI_RESET);
+                for (Map.Entry<String, AgentConfig> entry : agentConfigs.entrySet()) {
+                    System.out.printf(ANSI_BRIGHT_GREEN + "  %-12s: [%s] %s%n" + ANSI_RESET, 
+                        entry.getKey(), entry.getValue().provider, entry.getValue().modelName);
+                }
+                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                continue;
+            }
+
+            if (line.trim().toLowerCase().startsWith("/config")) {
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length < 3) {
+                    System.out.println(ANSI_BLUE + "Usage: /config <AgentName> <Provider> [ModelName]" + ANSI_RESET);
+                    System.out.println(ANSI_BLUE + "Example: /config Coder GEMINI gemini-2.0-flash" + ANSI_RESET);
+                } else {
+                    String agentName = parts[1];
+                    String providerStr = parts[2].toUpperCase();
+                    
+                    if (!agentConfigs.containsKey(agentName)) {
+                        System.out.println(ANSI_BLUE + "Unknown agent: " + agentName + ". Available: " + agentConfigs.keySet() + ANSI_RESET);
+                    } else {
+                        try {
+                            Provider newProvider = Provider.valueOf(providerStr);
+                            String newModel = (parts.length > 3) ? parts[3] : agentConfigs.get(agentName).modelName; 
+                            
+                            // Safe defaults if switching providers and no model specified
+                            if (parts.length == 3 && newProvider != agentConfigs.get(agentName).provider) {
+                                if (newProvider == Provider.GEMINI) newModel = "gemini-1.5-flash";
+                                else if (newProvider == Provider.BEDROCK) newModel = "anthropic.claude-3-sonnet-20240229-v1:0";
+                                else if (newProvider == Provider.OLLAMA) newModel = "devstral-small-2";
+                            }
+
+                            agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
+                            System.out.println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
+                            
+                            // Rebuild runner if Coordinator changed
+                            if ("Coordinator".equalsIgnoreCase(agentName)) {
+                                runner = runnerFactory.apply(agentConfigs);
+                            }
+                        } catch (IllegalArgumentException e) {
+                            System.out.println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, or BEDROCK." + ANSI_RESET);
+                        }
+                    }
+                }
+                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                continue;
+            }
 
             if ("/provider".equalsIgnoreCase(line.trim())) {
-                System.out.println(ANSI_BLUE + "Current Provider: " + currentProvider + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "Select new provider:" + ANSI_RESET);
+                AgentConfig coordConfig = agentConfigs.get("Coordinator");
+                System.out.println(ANSI_BLUE + "Current Coordinator Provider: " + coordConfig.provider + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "Select new provider for Coordinator:" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "[1] OLLAMA" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "[2] GEMINI" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "[3] BEDROCK" + ANSI_RESET);
@@ -860,21 +1029,28 @@ public class MkPro {
                 String selection = scanner.nextLine().trim();
                 System.out.print(ANSI_RESET);
                 
+                Provider newProvider = null;
+                String newModel = coordConfig.modelName;
+
                 if ("1".equals(selection)) {
-                    currentProvider = Provider.OLLAMA;
-                    System.out.println(ANSI_BLUE + "Provider switched to OLLAMA." + ANSI_RESET);
+                    newProvider = Provider.OLLAMA;
+                    System.out.println(ANSI_BLUE + "Switched to OLLAMA." + ANSI_RESET);
                 } else if ("2".equals(selection)) {
-                    currentProvider = Provider.GEMINI;
-                    System.out.println(ANSI_BLUE + "Provider switched to GEMINI. Defaulting to 'gemini-1.5-flash'." + ANSI_RESET);
-                    currentModelName = "gemini-1.5-flash"; 
+                    newProvider = Provider.GEMINI;
+                    newModel = "gemini-1.5-flash";
+                    System.out.println(ANSI_BLUE + "Switched to GEMINI. Defaulting to 'gemini-1.5-flash'." + ANSI_RESET);
                 } else if ("3".equals(selection)) {
-                    currentProvider = Provider.BEDROCK;
-                    System.out.println(ANSI_BLUE + "Provider switched to BEDROCK. Defaulting to 'anthropic.claude-3-sonnet-20240229-v1:0'." + ANSI_RESET);
-                    currentModelName = "anthropic.claude-3-sonnet-20240229-v1:0"; 
+                    newProvider = Provider.BEDROCK;
+                    newModel = "anthropic.claude-3-sonnet-20240229-v1:0";
+                    System.out.println(ANSI_BLUE + "Switched to BEDROCK. Defaulting to 'anthropic.claude-3-sonnet-20240229-v1:0'." + ANSI_RESET);
                 } else {
                     System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                 }
-                runner = runnerFactory.apply(currentModelName, currentProvider);
+                
+                if (newProvider != null) {
+                    agentConfigs.put("Coordinator", new AgentConfig(newProvider, newModel));
+                    runner = runnerFactory.apply(agentConfigs);
+                }
                 System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
@@ -903,15 +1079,16 @@ public class MkPro {
             }
 
             if ("/models".equalsIgnoreCase(line.trim())) {
-                if (currentProvider == Provider.GEMINI) {
+                AgentConfig coordConfig = agentConfigs.get("Coordinator");
+                if (coordConfig.provider == Provider.GEMINI) {
                     System.out.println(ANSI_BLUE + "Gemini Models:" + ANSI_RESET);
                     for (String m : GEMINI_MODELS) {
-                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(currentModelName) ? " (current)" : "") + ANSI_RESET);
+                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.modelName) ? " (current)" : "") + ANSI_RESET);
                     }
-                } else if (currentProvider == Provider.BEDROCK) {
+                } else if (coordConfig.provider == Provider.BEDROCK) {
                     System.out.println(ANSI_BLUE + "Bedrock Models:" + ANSI_RESET);
                     for (String m : BEDROCK_MODELS) {
-                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(currentModelName) ? " (current)" : "") + ANSI_RESET);
+                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.modelName) ? " (current)" : "") + ANSI_RESET);
                     }
                 } else {
                     System.out.println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
@@ -932,7 +1109,7 @@ public class MkPro {
                             boolean found = false;
                             while (matcher.find()) {
                                 String m = matcher.group(1);
-                                System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(currentModelName) ? " (current)" : "") + ANSI_RESET);
+                                System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.modelName) ? " (current)" : "") + ANSI_RESET);
                                 found = true;
                             }
                             if (!found) {
@@ -950,10 +1127,11 @@ public class MkPro {
             }
             
             if ("/model".equalsIgnoreCase(line.trim())) {
+                AgentConfig coordConfig = agentConfigs.get("Coordinator");
                 List<String> availableModels = new ArrayList<>();
-                if (currentProvider == Provider.GEMINI) {
+                if (coordConfig.provider == Provider.GEMINI) {
                     availableModels.addAll(GEMINI_MODELS);
-                } else if (currentProvider == Provider.BEDROCK) {
+                } else if (coordConfig.provider == Provider.BEDROCK) {
                     availableModels.addAll(BEDROCK_MODELS);
                 } else {
                     System.out.println(ANSI_BLUE + "Fetching available Ollama models for selection..." + ANSI_RESET);
@@ -984,12 +1162,12 @@ public class MkPro {
                 if (availableModels.isEmpty()) {
                     System.out.println(ANSI_BLUE + "No models available for selection." + ANSI_RESET);
                 } else {
-                    System.out.println(ANSI_BLUE + "Select a model (" + currentProvider + "):" + ANSI_RESET);
+                    System.out.println(ANSI_BLUE + "Select a model (" + coordConfig.provider + "):" + ANSI_RESET);
                     int defaultIndex = -1;
                     for (int i = 0; i < availableModels.size(); i++) {
                         String m = availableModels.get(i);
                         String marker = "";
-                        if (m.equals(currentModelName)) {
+                        if (m.equals(coordConfig.modelName)) {
                             marker = " (current)";
                             defaultIndex = i + 1;
                         }
@@ -1002,7 +1180,7 @@ public class MkPro {
                     
                     if (selection.isEmpty()) {
                         if (defaultIndex != -1) {
-                            System.out.println(ANSI_BLUE + "Keeping current model: " + currentModelName + ANSI_RESET);
+                            System.out.println(ANSI_BLUE + "Keeping current model: " + coordConfig.modelName + ANSI_RESET);
                         } else {
                             System.out.println(ANSI_BLUE + "No selection made." + ANSI_RESET);
                         }
@@ -1011,10 +1189,10 @@ public class MkPro {
                             int index = Integer.parseInt(selection);
                             if (index >= 1 && index <= availableModels.size()) {
                                 String newModel = availableModels.get(index - 1);
-                                if (!newModel.equals(currentModelName)) {
-                                    System.out.println(ANSI_BLUE + "Switching model to: " + newModel + "..." + ANSI_RESET);
-                                    currentModelName = newModel;
-                                    runner = runnerFactory.apply(currentModelName, currentProvider);
+                                if (!newModel.equals(coordConfig.modelName)) {
+                                    System.out.println(ANSI_BLUE + "Switching Coordinator model to: " + newModel + "..." + ANSI_RESET);
+                                    agentConfigs.put("Coordinator", new AgentConfig(coordConfig.provider, newModel));
+                                    runner = runnerFactory.apply(agentConfigs);
                                     System.out.println(ANSI_BLUE + "Model switched successfully." + ANSI_RESET);
                                 } else {
                                     System.out.println(ANSI_BLUE + "Model already selected." + ANSI_RESET);
