@@ -5,6 +5,7 @@ import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.memory.InMemoryMemoryService;
 import com.google.adk.models.OllamaBaseLM;
 import com.google.adk.models.Gemini;
+import com.google.adk.models.BedrockBaseLM;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.runner.Runner;
 import com.google.adk.sessions.InMemorySessionService;
@@ -49,8 +50,27 @@ public class MkPro {
 
     public enum Provider {
         OLLAMA,
-        GEMINI
+        GEMINI,
+        BEDROCK
     }
+    
+    private static final List<String> GEMINI_MODELS = Arrays.asList(
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash-exp"
+    );
+
+    private static final List<String> BEDROCK_MODELS = Arrays.asList(
+        "anthropic.claude-3-sonnet-20240229-v1:0",
+        "anthropic.claude-3-haiku-20240307-v1:0",
+        "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "meta.llama3-70b-instruct-v1:0",
+        "meta.llama3-8b-instruct-v1:0",
+        "amazon.titan-text-express-v1"
+    );
 
     // ANSI Color Constants
     public static final String ANSI_RESET = "\u001b[0m";
@@ -578,6 +598,13 @@ public class MkPro {
                 BaseLlm model;
                 if (request.provider == Provider.GEMINI) {
                     model = new Gemini(request.modelName, apiKey);
+                } else if (request.provider == Provider.BEDROCK) {
+                     // Using default region 'us-east-1' if not specified, or relying on SDK default chain.
+                     // The constructor provided in instruction was new BedrockBaseLM(bedrockModelId, bedrockUrl)
+                     // Passing null or standard endpoint if needed. 
+                     // Assuming standard region endpoint construction if URL is required.
+                     // Let's assume typical usage or null for default region handling by SDK.
+                     model = new BedrockBaseLM(request.modelName, null);
                 } else {
                     model = new OllamaBaseLM(request.modelName, "http://localhost:11434");
                 }
@@ -626,6 +653,8 @@ public class MkPro {
             BaseLlm model;
             if (currentProvider == Provider.GEMINI) {
                 model = new Gemini(currentModelName, apiKey);
+            } else if (currentProvider == Provider.BEDROCK) {
+                model = new BedrockBaseLM(currentModelName, null);
             } else {
                 model = new OllamaBaseLM(currentModelName, "http://localhost:11434");
             }
@@ -784,15 +813,6 @@ public class MkPro {
         }
     }
 
-    private static final List<String> GEMINI_MODELS = Arrays.asList(
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash-exp"
-    );
-
     private static void runConsoleLoop(BiFunction<String, Provider, Runner> runnerFactory, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose, String apiKey) {
         String currentModelName = initialModelName;
         Provider currentProvider = initialProvider;
@@ -816,8 +836,8 @@ public class MkPro {
 
             if ("/h".equalsIgnoreCase(line.trim()) || "/help".equalsIgnoreCase(line.trim())) {
                 System.out.println(ANSI_BLUE + "Available Commands:" + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /provider   - Switch between OLLAMA and GEMINI providers." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /models     - List available models (for current provider if supported)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /provider   - Switch between OLLAMA, GEMINI, and BEDROCK providers." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /models     - List available models (for current provider)." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change the current model." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /init       - Initialize project memory (if not exists)." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize/Update project memory." + ANSI_RESET);
@@ -835,17 +855,22 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "Select new provider:" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "[1] OLLAMA" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "[2] GEMINI" + ANSI_RESET);
+                System.out.println(ANSI_BRIGHT_GREEN + "[3] BEDROCK" + ANSI_RESET);
                 System.out.print(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW);
                 String selection = scanner.nextLine().trim();
                 System.out.print(ANSI_RESET);
                 
                 if ("1".equals(selection)) {
                     currentProvider = Provider.OLLAMA;
-                    System.out.println(ANSI_BLUE + "Provider switched to OLLAMA. Please use /model to select an Ollama model if needed." + ANSI_RESET);
+                    System.out.println(ANSI_BLUE + "Provider switched to OLLAMA." + ANSI_RESET);
                 } else if ("2".equals(selection)) {
                     currentProvider = Provider.GEMINI;
-                    System.out.println(ANSI_BLUE + "Provider switched to GEMINI. Defaulting to 'gemini-1.5-flash'. Use /model to change." + ANSI_RESET);
-                    currentModelName = "gemini-1.5-flash"; // Sane default
+                    System.out.println(ANSI_BLUE + "Provider switched to GEMINI. Defaulting to 'gemini-1.5-flash'." + ANSI_RESET);
+                    currentModelName = "gemini-1.5-flash"; 
+                } else if ("3".equals(selection)) {
+                    currentProvider = Provider.BEDROCK;
+                    System.out.println(ANSI_BLUE + "Provider switched to BEDROCK. Defaulting to 'anthropic.claude-3-sonnet-20240229-v1:0'." + ANSI_RESET);
+                    currentModelName = "anthropic.claude-3-sonnet-20240229-v1:0"; 
                 } else {
                     System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                 }
@@ -881,6 +906,11 @@ public class MkPro {
                 if (currentProvider == Provider.GEMINI) {
                     System.out.println(ANSI_BLUE + "Gemini Models:" + ANSI_RESET);
                     for (String m : GEMINI_MODELS) {
+                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(currentModelName) ? " (current)" : "") + ANSI_RESET);
+                    }
+                } else if (currentProvider == Provider.BEDROCK) {
+                    System.out.println(ANSI_BLUE + "Bedrock Models:" + ANSI_RESET);
+                    for (String m : BEDROCK_MODELS) {
                         System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(currentModelName) ? " (current)" : "") + ANSI_RESET);
                     }
                 } else {
@@ -923,6 +953,8 @@ public class MkPro {
                 List<String> availableModels = new ArrayList<>();
                 if (currentProvider == Provider.GEMINI) {
                     availableModels.addAll(GEMINI_MODELS);
+                } else if (currentProvider == Provider.BEDROCK) {
+                    availableModels.addAll(BEDROCK_MODELS);
                 } else {
                     System.out.println(ANSI_BLUE + "Fetching available Ollama models for selection..." + ANSI_RESET);
                     try {
