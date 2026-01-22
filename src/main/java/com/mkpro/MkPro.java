@@ -46,12 +46,19 @@ public class MkPro {
     public static final String ANSI_BLUE = "\u001b[34m";
 
     private static final List<String> GEMINI_MODELS = Arrays.asList(
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash-exp"
+         "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash-thinking",
+    "gemini-2.0-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-thinking-exp",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b"
     );
 
     private static final List<String> BEDROCK_MODELS = Arrays.asList(
@@ -179,6 +186,7 @@ public class MkPro {
             uiConfigs.put("DatabaseAdmin", new AgentConfig(Provider.OLLAMA, modelName));
             uiConfigs.put("DevOps", new AgentConfig(Provider.OLLAMA, modelName));
             uiConfigs.put("DataAnalyst", new AgentConfig(Provider.OLLAMA, modelName));
+            uiConfigs.put("GoalTracker", new AgentConfig(Provider.OLLAMA, modelName));
             
             Runner runner = runnerBuilder.apply(uiConfigs, currentRunnerType.get());
             SwingCompanion gui = new SwingCompanion(runner, mkSession, sessionService);
@@ -206,6 +214,7 @@ public class MkPro {
         agentConfigs.put("DatabaseAdmin", new AgentConfig(initialProvider, initialModelName));
         agentConfigs.put("DevOps", new AgentConfig(initialProvider, initialModelName));
         agentConfigs.put("DataAnalyst", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("GoalTracker", new AgentConfig(initialProvider, initialModelName));
 
         // Load overrides from Central Memory
         try {
@@ -305,6 +314,38 @@ public class MkPro {
                     }
                 } catch (Exception e) {
                     System.out.println(ANSI_BLUE + "Invalid input or error rebuilding runner: " + e.getMessage() + ANSI_RESET);
+                }
+                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                continue;
+            }
+
+            if ("/stats".equalsIgnoreCase(line.trim())) {
+                try {
+                    List<AgentStat> stats = centralMemory.getAgentStats();
+                    if (stats.isEmpty()) {
+                        System.out.println(ANSI_BLUE + "No statistics available yet." + ANSI_RESET);
+                    } else {
+                        System.out.println(ANSI_BLUE + "Agent Statistics:" + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + String.format("%-15s | %-10s | %-25s | %-8s | %-8s | %-8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
+                        
+                        // Show last 20 stats
+                        int start = Math.max(0, stats.size() - 20);
+                        for (int i = start; i < stats.size(); i++) {
+                            AgentStat s = stats.get(i);
+                            String modelShort = s.getModel();
+                            if (modelShort.length() > 25) modelShort = modelShort.substring(0, 22) + "...";
+                            
+                            System.out.println(ANSI_BRIGHT_GREEN + String.format("%-15s | %-10s | %-25s | %-8dms | %-8s | %d/%d", 
+                                s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
+                        }
+                        
+                        // Summary
+                        System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + "Total Invocations: " + stats.size() + ANSI_RESET);
+                    }
+                } catch (Exception e) {
+                    System.err.println(ANSI_BLUE + "Error retrieving stats: " + e.getMessage() + ANSI_RESET);
                 }
                 System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;

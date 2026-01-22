@@ -117,4 +117,59 @@ public class CentralMemory {
             return new ArrayList<>(stats);
         }
     }
+
+    // --- Goal Tracking ---
+
+    public void addGoal(String projectPath, com.mkpro.models.Goal goal) {
+        try (DB db = openDB()) {
+            HTreeMap<String, ArrayList<com.mkpro.models.Goal>> projectGoals = db.hashMap("project_goals")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.JAVA)
+                    .createOrOpen();
+            
+            ArrayList<com.mkpro.models.Goal> goals = projectGoals.get(projectPath);
+            if (goals == null) {
+                goals = new ArrayList<>();
+            }
+            goals.add(goal);
+            projectGoals.put(projectPath, goals);
+            db.commit();
+        }
+    }
+
+    public List<com.mkpro.models.Goal> getGoals(String projectPath) {
+        try (DB db = openDB()) {
+            HTreeMap<String, ArrayList<com.mkpro.models.Goal>> projectGoals = db.hashMap("project_goals")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.JAVA)
+                    .createOrOpen();
+            
+            ArrayList<com.mkpro.models.Goal> goals = projectGoals.get(projectPath);
+            if (goals == null) {
+                return new ArrayList<>();
+            }
+            return new ArrayList<>(goals);
+        }
+    }
+
+    public void updateGoal(String projectPath, com.mkpro.models.Goal updatedGoal) {
+        try (DB db = openDB()) {
+            HTreeMap<String, ArrayList<com.mkpro.models.Goal>> projectGoals = db.hashMap("project_goals")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.JAVA)
+                    .createOrOpen();
+            
+            ArrayList<com.mkpro.models.Goal> goals = projectGoals.get(projectPath);
+            if (goals != null) {
+                for (int i = 0; i < goals.size(); i++) {
+                    if (goals.get(i).getId().equals(updatedGoal.getId())) {
+                        goals.set(i, updatedGoal);
+                        break;
+                    }
+                }
+                projectGoals.put(projectPath, goals);
+                db.commit();
+            }
+        }
+    }
 }

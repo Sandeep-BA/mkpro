@@ -10,6 +10,7 @@ import io.reactivex.rxjava3.core.Single;
 import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 
+import java.util.List;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -493,6 +494,149 @@ public class MkProTools {
                         return Collections.singletonMap("projects", String.join("\n", memories.keySet()));
                     } catch (Exception e) {
                         return Collections.singletonMap("error", "Error listing projects: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createAddGoalTool(CentralMemory centralMemory) {
+        return new BaseTool(
+                "add_goal",
+                "Adds a new goal to the current project's tracking list."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "description", Schema.builder()
+                                                .type("STRING")
+                                                .description("Description of the goal.")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("description"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String description = (String) args.get("description");
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                System.out.println(ANSI_BLUE + "[GoalTracker] Adding goal: " + description + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        com.mkpro.models.Goal goal = new com.mkpro.models.Goal(description);
+                        centralMemory.addGoal(currentPath, goal);
+                        return Collections.singletonMap("status", "Goal added with ID: " + goal.getId());
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Error adding goal: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createListGoalsTool(CentralMemory centralMemory) {
+        return new BaseTool(
+                "list_goals",
+                "Lists all goals for the current project."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(Collections.emptyMap())
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                System.out.println(ANSI_BLUE + "[GoalTracker] Listing goals..." + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        List<com.mkpro.models.Goal> goals = centralMemory.getGoals(currentPath);
+                        if (goals.isEmpty()) {
+                            return Collections.singletonMap("goals", "No goals found.");
+                        }
+                        StringBuilder sb = new StringBuilder();
+                        for (com.mkpro.models.Goal goal : goals) {
+                            sb.append(goal.toString()).append("\n");
+                        }
+                        return Collections.singletonMap("goals", sb.toString());
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Error listing goals: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createUpdateGoalTool(CentralMemory centralMemory) {
+        return new BaseTool(
+                "update_goal_status",
+                "Updates the status of an existing goal."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "goal_id", Schema.builder()
+                                                .type("STRING")
+                                                .description("The ID of the goal to update.")
+                                                .build(),
+                                        "status", Schema.builder()
+                                                .type("STRING")
+                                                .description("New status (PENDING, IN_PROGRESS, COMPLETED, FAILED).")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("goal_id", "status"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String goalId = (String) args.get("goal_id");
+                String statusStr = (String) args.get("status");
+                String currentPath = Paths.get("").toAbsolutePath().toString();
+                
+                System.out.println(ANSI_BLUE + "[GoalTracker] Updating goal " + goalId + " to " + statusStr + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        List<com.mkpro.models.Goal> goals = centralMemory.getGoals(currentPath);
+                        com.mkpro.models.Goal target = null;
+                        for (com.mkpro.models.Goal g : goals) {
+                            if (g.getId().equals(goalId)) {
+                                target = g;
+                                break;
+                            }
+                        }
+                        
+                        if (target == null) {
+                            return Collections.singletonMap("error", "Goal not found with ID: " + goalId);
+                        }
+
+                        target.setStatus(com.mkpro.models.Goal.Status.valueOf(statusStr.toUpperCase()));
+                        centralMemory.updateGoal(currentPath, target);
+                        return Collections.singletonMap("status", "Goal updated successfully.");
+                    } catch (IllegalArgumentException e) {
+                        return Collections.singletonMap("error", "Invalid status. Use PENDING, IN_PROGRESS, COMPLETED, or FAILED.");
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Error updating goal: " + e.getMessage());
                     }
                 });
             }

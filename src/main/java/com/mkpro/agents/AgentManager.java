@@ -116,9 +116,22 @@ public class AgentManager {
         dataAnalystTools.addAll(coderTools); // Read/Write Python scripts and data files
         dataAnalystTools.add(MkProTools.createRunShellTool()); // Execute python scripts
 
+        List<BaseTool> goalTrackerTools = new ArrayList<>();
+        goalTrackerTools.add(MkProTools.createAddGoalTool(centralMemory));
+        goalTrackerTools.add(MkProTools.createListGoalsTool(centralMemory));
+        goalTrackerTools.add(MkProTools.createUpdateGoalTool(centralMemory));
+
         // Delegation Tools
         List<BaseTool> coordinatorTools = new ArrayList<>();
         
+        coordinatorTools.add(createDelegationTool(
+            "ask_goal_tracker", 
+            "Delegates goal management tasks to the Goal Tracker agent.",
+            "GoalTracker",
+            "You are the Goal Tracker. You manage the project's goals and TODOs. You can add new goals, list existing ones, and update their status. Keep track of progress item by item. Ensure goals are specific and trackable.",
+            agentConfigs, goalTrackerTools, contextInfo
+        ));
+
         coordinatorTools.add(createDelegationTool(
             "ask_coder", 
             "Delegates coding tasks to the Coder agent (read/write files, list dirs).",
@@ -203,16 +216,17 @@ public class AgentManager {
             .name("Coordinator")
             .description("The main orchestrator agent.")
             .instruction("You are the Coordinator. You interface with the user and manage the workflow. "
-                    + "You have nine specialized sub-agents: \n" 
-                    + "1. **Coder**: Handles all file operations (read, write, analyze images). \n" 
-                    + "2. **SysAdmin**: Handles all shell command executions. \n" 
-                    + "3. **Tester**: specialized in writing and running unit tests. \n" 
-                    + "4. **DocWriter**: specialized in writing and updating documentation. \n" 
-                    + "5. **SecurityAuditor**: specialized in finding vulnerabilities and running security scans. \n" 
-                    + "6. **Architect**: specialized in high-level design review and structural analysis. \n" 
-                    + "7. **DatabaseAdmin**: specialized in SQL, schemas, and migrations. \n" 
-                    + "8. **DevOps**: specialized in infrastructure, Docker, and CI/CD. \n" 
-                    + "9. **DataAnalyst**: specialized in Python-based data analysis and statistics. \n" 
+                    + "You have ten specialized sub-agents: \n" 
+                    + "1. **GoalTracker**: specialized in tracking project goals, TODOs, and progress. \n"
+                    + "2. **Coder**: Handles all file operations (read, write, analyze images). \n" 
+                    + "3. **SysAdmin**: Handles all shell command executions. \n" 
+                    + "4. **Tester**: specialized in writing and running unit tests. \n" 
+                    + "5. **DocWriter**: specialized in writing and updating documentation. \n" 
+                    + "6. **SecurityAuditor**: specialized in finding vulnerabilities and running security scans. \n" 
+                    + "7. **Architect**: specialized in high-level design review and structural analysis. \n" 
+                    + "8. **DatabaseAdmin**: specialized in SQL, schemas, and migrations. \n" 
+                    + "9. **DevOps**: specialized in infrastructure, Docker, and CI/CD. \n" 
+                    + "10. **DataAnalyst**: specialized in Python-based data analysis and statistics. \n" 
                     + "Delegate tasks appropriately. Do not try to write files or run commands yourself; you don't have those tools. " 
                     + "You DO have tools to fetch URLs and manage long-term memory. " 
                     + "Always prefer concise answers."
@@ -311,13 +325,24 @@ public class AgentManager {
         boolean success = true;
         StringBuilder output = new StringBuilder();
         
+        // Log start of execution to persistent logs
+        String executionInfo = String.format("Executing %s using %s (%s)", 
+            request.getAgentName(), request.getProvider(), request.getModelName());
+        logger.log("SYSTEM", executionInfo);
+
         try {
             AgentConfig config = new AgentConfig(request.getProvider(), request.getModelName());
             BaseLlm model = createModel(config);
             
+            // Inject identity into state memory (instruction)
+            String augmentedInstruction = request.getInstruction() + 
+                "\n\n[System State: Running on Provider: " + request.getProvider() + 
+                ", Model: " + request.getModelName() + "]" +
+                "\n\nNOTE: You do not have direct access to action logs. If you need historical context or logs to complete a task, state this clearly in your final report so the Coordinator can provide it in the next turn.";
+
             LlmAgent subAgent = LlmAgent.builder()
                 .name(request.getAgentName())
-                .instruction(request.getInstruction())
+                .instruction(augmentedInstruction)
                 .model(model)
                 .tools(request.getTools())
                 .planning(true)
