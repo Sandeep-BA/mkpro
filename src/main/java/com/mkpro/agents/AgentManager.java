@@ -250,21 +250,27 @@ public class AgentManager {
             .planning(true)
             .build();
 
-        return buildRunner(coordinatorAgent, "mkpro-cli");
+        return buildRunner(coordinatorAgent, "mkpro");
     }
 
     private Runner buildRunner(LlmAgent agent, String appName) {
         switch (runnerType) {
             case MAP_DB:
                 try {
-                    return new MapDbRunner(agent);
+                    return MapDbRunner.builder()
+                        .agent(agent)
+                        .appName(appName)
+                        .build();
                 } catch (Exception e) {
                     System.err.println("Error creating MapDbRunner: " + e.getMessage());
                     // Fallback to InMemory
                 }
             case POSTGRES:
                 try {
-                    return new PostgresRunner(agent);
+                    return PostgresRunner.builder()
+                        .agent(agent)
+                        .appName(appName)
+                        .build();
                 } catch (Exception e) {
                     System.err.println("Error creating PostgresRunner: " + e.getMessage());
                     // Fallback to InMemory
@@ -362,15 +368,16 @@ public class AgentManager {
                 .build();
 
             // 1. Build the runner (which might create its own SessionService)
-            Runner subRunner = buildRunner(subAgent, request.getAgentName());
+            Runner subRunner = buildRunner(subAgent, "mkpro");
 
             // 2. Use the runner's session service to create the session
             // This ensures the session exists in the correct store (InMemory, MapDB, Postgres)
-            Session subSession = subRunner.sessionService().createSession(request.getAgentName(), "user").blockingGet();
+            // Use agent name as the user name for better attribution
+            Session subSession = subRunner.sessionService().createSession("mkpro", request.getAgentName()).blockingGet();
 
             Content content = Content.builder().role("user").parts(List.of(Part.fromText(request.getUserPrompt()))).build();
             
-            subRunner.runAsync("user", subSession.id(), content)
+            subRunner.runAsync(request.getAgentName(), subSession.id(), content)
                   .filter(e -> e.content().isPresent())
                   .blockingForEach(e -> 
                       e.content().flatMap(Content::parts).orElse(Collections.emptyList())

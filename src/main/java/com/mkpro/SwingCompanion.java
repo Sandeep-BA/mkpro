@@ -129,7 +129,7 @@ public class SwingCompanion {
                 .build();
 
         // Run agent asynchronously
-        Disposable d = runner.runAsync("user", session.id(), content)
+        Disposable d = runner.runAsync("Coordinator", session.id(), content)
                 .observeOn(Schedulers.io()) // Process on IO thread
                 .filter(event -> event.content().isPresent())
                 .subscribe(

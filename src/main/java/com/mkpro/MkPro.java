@@ -161,7 +161,7 @@ public class MkPro {
         InMemoryMemoryService memoryService = new InMemoryMemoryService();
         
         CentralMemory centralMemory = new CentralMemory();
-        Session mkSession = sessionService.createSession("mkpro-cli", "user").blockingGet();
+        Session mkSession = sessionService.createSession("mkpro", "Coordinator").blockingGet();
         ActionLogger logger = new ActionLogger("mkpro_logs.db");
         java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType = new java.util.concurrent.atomic.AtomicReference<>(initialRunnerType);
 
@@ -240,7 +240,7 @@ public class MkPro {
         }
 
         Runner runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-        Session currentSession = runner.sessionService().createSession(runner.appName(), "user").blockingGet();
+        Session currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
         
         if (verbose) {
             System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
@@ -305,7 +305,7 @@ public class MkPro {
                                 currentRunnerType.set(newType);
                                 System.out.println(ANSI_BLUE + "Switched to " + currentRunnerType.get() + ". Rebuilding runner..." + ANSI_RESET);
                                 runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-                                currentSession = runner.sessionService().createSession(runner.appName(), "user").blockingGet();
+                                currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
                                 System.out.println(ANSI_BLUE + "Runner rebuilt. New Session ID: " + currentSession.id() + ANSI_RESET);
                             } else {
                                 System.out.println(ANSI_BLUE + "Switch cancelled." + ANSI_RESET);
@@ -746,7 +746,7 @@ public class MkPro {
             }
 
             if ("/reset".equalsIgnoreCase(line.trim())) {
-                currentSession = runner.sessionService().createSession(runner.appName(), "user").blockingGet();
+                currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
                 System.out.println(ANSI_BLUE + "System: Session reset. New session ID: " + currentSession.id() + ANSI_RESET);
                 logger.log("SYSTEM", "Session reset by user.");
                 System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
@@ -768,7 +768,7 @@ public class MkPro {
                         .build();
 
                 try {
-                    runner.runAsync("user", currentSession.id(), summaryRequest)
+                    runner.runAsync("Coordinator", currentSession.id(), summaryRequest)
                         .filter(event -> event.content().isPresent())
                         .blockingForEach(event -> 
                             event.content().flatMap(Content::parts).orElse(Collections.emptyList())
@@ -788,7 +788,7 @@ public class MkPro {
                 }
 
                 // 2. Create New Session
-                currentSession = runner.sessionService().createSession(runner.appName(), "user").blockingGet();
+                currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
                 String newSessionId = currentSession.id();
                 
                 System.out.println(ANSI_BLUE + "System: Session compacted. New Session ID: " + newSessionId + ANSI_RESET);
@@ -866,7 +866,7 @@ public class MkPro {
             try {
                 StringBuilder responseBuilder = new StringBuilder();
                 
-                runner.runAsync("user", currentSession.id(), content)
+                runner.runAsync("Coordinator", currentSession.id(), content)
                         .filter(event -> event.content().isPresent())
                         .blockingForEach(event -> {
                             if (isThinking.getAndSet(false)) {

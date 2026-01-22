@@ -138,3 +138,33 @@ The project is modularized for maintainability:
 - `com.mkpro.agents.AgentManager`: Logic for creating and delegating to sub-agents.
 - `com.mkpro.tools.MkProTools`: Factory for all tool implementations (File I/O, Shell, Web).
 - `com.mkpro.models`: Data classes for configuration and persistence.
+
+### Agent Interaction Flow
+
+```mermaid
+graph TD
+    User([User]) -->|Inputs Prompt| MkPro[MkPro CLI/UI]
+    MkPro -->|Delegates| Coordinator[Coordinator Agent]
+    
+    subgraph "Agent Ecosystem"
+        Coordinator -->|Delegates Task| Coder[Coder]
+        Coordinator -->|Delegates Task| Tester[Tester]
+        Coordinator -->|Delegates Task| SysAdmin[SysAdmin]
+        Coordinator -->|Delegates Task| GoalTracker[GoalTracker]
+        Coordinator -.->|Manages| Others[Other Agents...]
+    end
+
+    subgraph "Execution & State"
+        Coder -->|Executes| Runner[ADK Runner]
+        Tester -->|Executes| Runner
+        Runner -->|Persists| Session[Session Memory]
+        Runner -->|Records| ActionLogger[(Action Logger)]
+        GoalTracker -->|Updates| CentralMem[(Central Memory)]
+    end
+
+    subgraph "Tools"
+        Coder -->|Uses| FileTools[File System]
+        Tester -->|Uses| Selenium[Selenium Browser]
+        SysAdmin -->|Uses| Shell[Shell Execution]
+    end
+```

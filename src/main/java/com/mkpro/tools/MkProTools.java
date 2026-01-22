@@ -325,14 +325,22 @@ public class MkProTools {
                         } else {
                             pb = new ProcessBuilder("sh", "-c", command);
                         }
+                        
+                        // Prevent hanging on interactive input
+                        pb.environment().put("PYTHONUNBUFFERED", "1");
+                        pb.environment().put("CI", "true"); // Often disables interactive prompts
+                        
                         pb.redirectErrorStream(true);
                         Process process = pb.start();
+                        
+                        // Close stdin immediately to send EOF if script tries to read input
+                        process.getOutputStream().close();
                         
                         String output = new String(process.getInputStream().readAllBytes());
                         boolean exited = process.waitFor(10, TimeUnit.SECONDS);
                         if (!exited) {
                              process.destroy();
-                             output += "\n[Timeout]";
+                             output += "\n[Timeout - process killed]";
                         }
                         int exitCode = exited ? process.exitValue() : -1;
 
