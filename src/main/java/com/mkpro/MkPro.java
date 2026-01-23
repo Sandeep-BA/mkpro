@@ -52,6 +52,7 @@ public class MkPro {
     // ANSI Color Constants
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BRIGHT_GREEN = "\u001b[92m";
+    public static final String ANSI_LIGHT_ORANGE = "\u001b[38;5;214m";
     public static final String ANSI_YELLOW = "\u001b[33m"; // Closest to Orange
     public static final String ANSI_BLUE = "\u001b[34m";
 
@@ -481,7 +482,7 @@ public class MkPro {
                                 .subscribe(                        event -> {
                             event.content().flatMap(Content::parts).orElse(Collections.emptyList()).forEach(part -> 
                                 part.text().ifPresent(text -> {
-                                    System.out.print(text);
+                                    System.out.print(ANSI_LIGHT_ORANGE + text);
                                     responseBuilder.append(text);
                                 })
                             );
@@ -498,7 +499,7 @@ public class MkPro {
                         }
                     );
 
-                System.out.print(ANSI_BRIGHT_GREEN); 
+                System.out.print(ANSI_LIGHT_ORANGE); 
                 
                 // Spinner chars
                 String[] syms = {"|", "/", "-", "\\"};
@@ -530,7 +531,7 @@ public class MkPro {
                         // Once response starts, ensure we cleared the spinner line once
                         if (spinnerIdx != -1) {
                              System.out.print("\r" + " ".repeat(20) + "\r"); // Clear spinner
-                             System.out.print(ANSI_BRIGHT_GREEN + responseBuilder.toString()); // Reprint what we have so far properly if needed, or just let stream take over
+                             System.out.print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); // Reprint what we have so far properly if needed, or just let stream take over
                              spinnerIdx = -1; // Flag that we are done spinning
                         }
                     }
