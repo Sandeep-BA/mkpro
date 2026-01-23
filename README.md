@@ -140,6 +140,15 @@ The project is modularized for maintainability:
 - `com.mkpro.tools.MkProTools`: Factory for all tool implementations (File I/O, Shell, Web).
 - `com.mkpro.models`: Data classes for configuration and persistence.
 
+### 🧠 How Agents Share Memory
+
+`mkpro` uses a **hub-and-spoke** memory architecture to ensure agents remain focused while still being able to collaborate:
+
+1.  **Coordinator as the Hub**: Sub-agents (like Coder or SysAdmin) are technically "amnesic" for security and focus. They operate in isolated, short-lived sessions. The **Coordinator** is responsible for providing all necessary context (from previous turns or other agents) in the instructions it sends when delegating a task.
+2.  **Central Memory (Shared Whiteboard)**: A persistent MapDB store (`central_memory.db`) acts as a long-term project memory. It stores project-wide summaries, agent configurations, and session-agnostic goals. The **GoalTracker** agent primarily manages this space.
+3.  **Action Logs (Audit Trail)**: Every user interaction and agent action is recorded in `mkpro_logs.db`. The **Coordinator** has a specialized tool (`get_action_logs`) to read these logs, allowing it to "recall" past events and decisions to inform current tasks.
+4.  **Runner Persistence**: When using `MAP_DB` or `POSTGRES` runners, the individual conversation history for each agent is persisted, allowing them to maintain context across a long-running session without hitting token limits (especially when combined with `/compact`).
+
 ### Agent Interaction Flow
 
 ```mermaid
