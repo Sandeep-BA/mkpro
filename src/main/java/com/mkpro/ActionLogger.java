@@ -43,6 +43,16 @@ public class ActionLogger implements Closeable {
         return result;
     }
 
+    public java.util.List<String> getRecentLogs(int limit) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        int size = logs.size();
+        int start = Math.max(0, size - limit);
+        for (int i = start; i < size; i++) {
+            result.add(logs.get(i));
+        }
+        return result;
+    }
+
     @Override
     public void close() {
         if (!db.isClosed()) {

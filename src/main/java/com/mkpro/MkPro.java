@@ -210,6 +210,30 @@ public class MkPro {
         logger.close();
     }
 
+    private static void saveSessionId(String sessionId) {
+        try {
+            Path mkproDir = Paths.get(System.getProperty("user.home"), ".mkpro");
+            if (!Files.exists(mkproDir)) {
+                Files.createDirectories(mkproDir);
+            }
+            Files.writeString(mkproDir.resolve("session_id"), sessionId);
+        } catch (IOException e) {
+            // Ignore errors
+        }
+    }
+
+    private static String loadSessionId() {
+        try {
+            Path sessionFile = Paths.get(System.getProperty("user.home"), ".mkpro", "session_id");
+            if (Files.exists(sessionFile)) {
+                return Files.readString(sessionFile).trim();
+            }
+        } catch (IOException e) {
+            // Ignore errors
+        }
+        return null;
+    }
+
     private static void runConsoleLoop(java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> runnerBuilder, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
         // Initialize default configs for all agents
         Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
@@ -261,6 +285,8 @@ public class MkPro {
             System.err.println("Error initializing JLine terminal: " + e.getMessage());
             System.exit(1);
         }
+        final Terminal fTerminal = terminal;
+        final LineReader fLineReader = lineReader;
 
         if (verbose) {
             System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
@@ -271,7 +297,7 @@ public class MkPro {
             String line = null;
             try {
                 // ANSI colors in prompt: \u001b[34m> \u001b[33m
-                line = lineReader.readLine(ANSI_BLUE + "> " + ANSI_YELLOW); 
+                line = fLineReader.readLine(ANSI_BLUE + "> " + ANSI_YELLOW); 
                 System.out.print(ANSI_RESET); // Reset after input
             } catch (UserInterruptException e) {
                 continue; 
@@ -401,8 +427,161 @@ public class MkPro {
             }
 
             if (line.toLowerCase().startsWith("/config")) {
-                 System.out.println(ANSI_BLUE + "Use /config commands via UI or arguments. Interactive CLI config partially disabled in this view for simplicity." + ANSI_RESET);
-                 continue;
+                String[] parts = line.trim().split("\\s+");
+                
+                // Interactive Mode
+                if (parts.length == 1) {
+                    fTerminal.writer().println(ANSI_BLUE + "Select Agent to configure:" + ANSI_RESET);
+                    List<String> agentNames = new ArrayList<>(agentConfigs.keySet());
+                    Collections.sort(agentNames); 
+                    for (int i = 0; i < agentNames.size(); i++) {
+                        AgentConfig ac = agentConfigs.get(agentNames.get(i));
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s (Current: %s - %s)%n" + ANSI_RESET, 
+                            i + 1, agentNames.get(i), ac.getProvider(), ac.getModelName());
+                    }
+                    
+                    String agentSelection = fLineReader.readLine(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
+                    
+                    if (agentSelection.isEmpty()) continue;
+                    
+                    String selectedAgent = null;
+                    try {
+                        int idx = Integer.parseInt(agentSelection) - 1;
+                        if (idx >= 0 && idx < agentNames.size()) {
+                            selectedAgent = agentNames.get(idx);
+                        }
+                    } catch (NumberFormatException e) {}
+                    
+                    if (selectedAgent == null) {
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
+                        continue;
+                    }
+
+                    // 2. Select Provider
+                    fTerminal.writer().println(ANSI_BLUE + "Select Provider for " + selectedAgent + ":" + ANSI_RESET);
+                    Provider[] providers = Provider.values();
+                    for (int i = 0; i < providers.length; i++) {
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, providers[i]);
+                    }
+                    
+                    String providerSelection = fLineReader.readLine(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
+                    
+                    if (providerSelection.isEmpty()) continue;
+                    
+                    Provider selectedProvider = null;
+                    try {
+                        int idx = Integer.parseInt(providerSelection) - 1;
+                        if (idx >= 0 && idx < providers.length) {
+                            selectedProvider = providers[idx];
+                        }
+                    } catch (NumberFormatException e) {}
+                    
+                    if (selectedProvider == null) {
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
+                        continue;
+                    }
+
+                    // 3. Select Model
+                    List<String> availableModels = new ArrayList<>();
+                    if (selectedProvider == Provider.GEMINI) {
+                        availableModels.addAll(GEMINI_MODELS);
+                    } else if (selectedProvider == Provider.BEDROCK) {
+                        availableModels.addAll(BEDROCK_MODELS);
+                    } else if (selectedProvider == Provider.OLLAMA) {
+                        fTerminal.writer().println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
+                        try {
+                            HttpClient client = HttpClient.newHttpClient();
+                            HttpRequest request = HttpRequest.newBuilder()
+                                    .uri(URI.create("http://localhost:11434/api/tags"))
+                                    .timeout(Duration.ofSeconds(5))
+                                    .GET()
+                                    .build();
+                            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                            if (response.statusCode() == 200) {
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"name\":\"([^\"]+)\"").matcher(response.body());
+                                while (matcher.find()) availableModels.add(matcher.group(1));
+                            }
+                        } catch (Exception e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Could not fetch Ollama models. You can type the model name manually." + ANSI_RESET);
+                        }
+                    }
+
+                    String selectedModel = null;
+                    if (!availableModels.isEmpty()) {
+                        fTerminal.writer().println(ANSI_BLUE + "Select Model:" + ANSI_RESET);
+                        for (int i = 0; i < availableModels.size(); i++) {
+                            fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, availableModels.get(i));
+                        }
+                        fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [M] Manual Entry" + ANSI_RESET);
+                        
+                        String modelSel = fLineReader.readLine(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        
+                        if (!"M".equalsIgnoreCase(modelSel)) {
+                            try {
+                                int idx = Integer.parseInt(modelSel) - 1;
+                                if (idx >= 0 && idx < availableModels.size()) {
+                                    selectedModel = availableModels.get(idx);
+                                }
+                            } catch (NumberFormatException e) {}
+                        }
+                    }
+
+                    if (selectedModel == null) {
+                        selectedModel = fLineReader.readLine(ANSI_BLUE + "Enter model name manually: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                    }
+
+                    if (selectedModel.isEmpty()) {
+                         fTerminal.writer().println(ANSI_BLUE + "Model selection cancelled." + ANSI_RESET);
+                         continue;
+                    }
+
+                    // Apply Configuration
+                    agentConfigs.put(selectedAgent, new AgentConfig(selectedProvider, selectedModel));
+                    centralMemory.saveAgentConfig(selectedAgent, selectedProvider.name(), selectedModel);
+                    fTerminal.writer().println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
+                    
+                    if ("Coordinator".equalsIgnoreCase(selectedAgent)) {
+                        runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
+                        fTerminal.writer().println(ANSI_BLUE + "Coordinator runner rebuilt." + ANSI_RESET);
+                    }
+
+                } else if (parts.length >= 3) {
+                    // Command Line Mode (legacy)
+                    String agentName = parts[1];
+                    String providerStr = parts[2].toUpperCase();
+                    
+                    if (!agentConfigs.containsKey(agentName)) {
+                        fTerminal.writer().println(ANSI_BLUE + "Unknown agent: " + agentName + ". Available: " + agentConfigs.keySet() + ANSI_RESET);
+                    } else {
+                        try {
+                            Provider newProvider = Provider.valueOf(providerStr);
+                            String newModel = (parts.length > 3) ? parts[3] : agentConfigs.get(agentName).getModelName(); 
+                            
+                            if (parts.length == 3 && newProvider != agentConfigs.get(agentName).getProvider()) {
+                                if (newProvider == Provider.GEMINI) newModel = "gemini-1.5-flash";
+                                else if (newProvider == Provider.BEDROCK) newModel = "anthropic.claude-3-sonnet-20240229-v1:0";
+                                else if (newProvider == Provider.OLLAMA) newModel = "devstral-small-2";
+                            }
+
+                            agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
+                            centralMemory.saveAgentConfig(agentName, newProvider.name(), newModel);
+                            fTerminal.writer().println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
+                            
+                            if ("Coordinator".equalsIgnoreCase(agentName)) {
+                                runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
+                            }
+                        } catch (IllegalArgumentException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, or BEDROCK." + ANSI_RESET);
+                        }
+                    }
+                } else {
+                     fTerminal.writer().println(ANSI_BLUE + "Usage: /config (interactive) OR /config <Agent> <Provider> [Model]" + ANSI_RESET);
+                }
+                continue;
             }
 
             if ("/reset".equalsIgnoreCase(line)) {
@@ -473,75 +652,81 @@ public class MkPro {
             StringBuilder responseBuilder = new StringBuilder();
             Disposable agentSubscription = null;
             
-                        try {
-                            // Using var for type inference to match ADK return type exactly
-                            var flowable = runner.runAsync("Coordinator", currentSession.id(), content);
-                            
-                            agentSubscription = flowable
-                                .filter(event -> event.content().isPresent())
-                                .subscribe(                        event -> {
-                            event.content().flatMap(Content::parts).orElse(Collections.emptyList()).forEach(part -> 
-                                part.text().ifPresent(text -> {
-                                    System.out.print(ANSI_LIGHT_ORANGE + text);
-                                    responseBuilder.append(text);
-                                })
-                            );
-                        },
-                        error -> {
-                            isThinking.set(false);
-                            System.err.println(ANSI_BLUE + "\nError processing request: " + error.getMessage() + ANSI_RESET);
-                            logger.log("ERROR", error.getMessage());
-                        },
-                        () -> {
-                            isThinking.set(false);
-                            System.out.println(ANSI_RESET); 
-                            logger.log("AGENT", responseBuilder.toString());
-                        }
-                    );
-
-                System.out.print(ANSI_LIGHT_ORANGE); 
-                
-                // Spinner chars
-                String[] syms = {"|", "/", "-", "\\"};
-                int spinnerIdx = 0;
-                long lastSpinnerUpdate = 0;
-
-                while (isThinking.get()) {
-                    // Non-blocking read with timeout
-                    int c = terminal.reader().read(10); 
-                    if (c == 27) { // ESC
-                        isCancelled.set(true);
-                        agentSubscription.dispose();
-                        isThinking.set(false);
-                        // Clear spinner/line if needed, though we are in streaming mode so usually text is appended
-                        System.out.print(ANSI_RESET);
-                        System.out.println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
-                        logger.log("SYSTEM", "User interrupted the agent.");
-                        break;
-                    }
-                    
-                    // Update spinner only if no response has started streaming yet
-                    if (responseBuilder.length() == 0) {
-                        long now = System.currentTimeMillis();
-                        if (now - lastSpinnerUpdate > 100) {
-                            System.out.print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
-                            System.out.flush();
-                            lastSpinnerUpdate = now;
-                        }
-                    } else {
-                        // Once response starts, ensure we cleared the spinner line once
-                        if (spinnerIdx != -1) {
-                             System.out.print("\r" + " ".repeat(20) + "\r"); // Clear spinner
-                             System.out.print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); // Reprint what we have so far properly if needed, or just let stream take over
-                             spinnerIdx = -1; // Flag that we are done spinning
-                        }
-                    }
-                }
-
-            } catch (Exception e) {
-                System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
-            }
-        }
+                                    try {
+                                        // Using var for type inference to match ADK return type exactly
+                                        var flowable = runner.runAsync("Coordinator", currentSession.id(), content);
+                                        
+                                        agentSubscription = flowable
+                                            .filter(event -> event.content().isPresent())
+                                            .subscribe(
+                                                event -> {
+                                                                                event.content().flatMap(Content::parts).orElse(Collections.emptyList()).forEach(part -> 
+                                                                                    part.text().ifPresent(text -> {
+                                                                                        fTerminal.writer().print(ANSI_LIGHT_ORANGE + text);
+                                                                                        fTerminal.writer().flush();
+                                                                                        responseBuilder.append(text);
+                                                                                    })
+                                                                                );
+                                                                            },
+                                                                            error -> {
+                                                                                isThinking.set(false);
+                                                                                fTerminal.writer().println(ANSI_BLUE + "\nError processing request: " + error.getMessage() + ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                logger.log("ERROR", error.getMessage());
+                                                                            },
+                                                                            () -> {
+                                                                                isThinking.set(false);
+                                                                                fTerminal.writer().println(ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                logger.log("AGENT", responseBuilder.toString());
+                                                                            }
+                                                                        );
+                                                    
+                                                                    // Initial color set
+                                                                    fTerminal.writer().print(ANSI_LIGHT_ORANGE);
+                                                                    fTerminal.writer().flush();
+                                                                    
+                                                                    // Spinner chars
+                                                                    String[] syms = {"|", "/", "-", "\\"};
+                                                                    int spinnerIdx = 0;
+                                                                    long lastSpinnerUpdate = 0;
+                                                    
+                                                                    while (isThinking.get()) {
+                                                                        // Non-blocking read with timeout
+                                                                        int c = fTerminal.reader().read(10); 
+                                                                        if (c == 27) { // ESC
+                                                                            isCancelled.set(true);
+                                                                            agentSubscription.dispose();
+                                                                            isThinking.set(false);
+                                                                            fTerminal.writer().print(ANSI_RESET);
+                                                                            fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
+                                                                            fTerminal.writer().flush();
+                                                                            logger.log("SYSTEM", "User interrupted the agent.");
+                                                                            break;
+                                                                        }
+                                                                        
+                                                                        // Update spinner only if no response has started streaming yet
+                                                                        if (responseBuilder.length() == 0) {
+                                                                            long now = System.currentTimeMillis();
+                                                                            if (now - lastSpinnerUpdate > 100) {
+                                                                                fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                lastSpinnerUpdate = now;
+                                                                            }
+                                                                        } else {
+                                                                            // Once response starts, ensure we cleared the spinner line once
+                                                                            if (spinnerIdx != -1) {
+                                                                                 fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
+                                                                                 fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); // Reprint buffer to be safe
+                                                                                 fTerminal.writer().flush();
+                                                                                 spinnerIdx = -1; // Flag that we are done spinning
+                                                                            }
+                                                                        }
+                                                                    }
+                        
+                                    } catch (Exception e) {
+                                        System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
+                                    }        }
         
         if (verbose) System.out.println(ANSI_BLUE + "Goodbye!" + ANSI_RESET);
     }
