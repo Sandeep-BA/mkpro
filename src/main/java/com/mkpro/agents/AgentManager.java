@@ -41,6 +41,15 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.mkpro.models.AgentDefinition;
+import com.mkpro.models.AgentsConfig;
+import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.InputStream;
+import java.util.HashMap;
+
 public class AgentManager {
 
     private final InMemorySessionService sessionService;
@@ -50,9 +59,33 @@ public class AgentManager {
     private final ActionLogger logger;
     private final CentralMemory centralMemory;
     private final RunnerType runnerType;
+    private final Map<String, AgentDefinition> agentDefinitions;
 
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BLUE = "\u001b[34m";
+
+    private static final String BASE_AGENT_POLICY =
+    "Authority:\n" +
+    "- You are an autonomous specialist operating under the Coordinator agent.\n" +
+    "- You MUST act only within the scope of your assigned responsibilities.\n" +
+    "\n" +
+    "General Rules:\n" +
+    "- You MUST follow all explicit instructions provided by the Coordinator.\n" +
+    "- You MUST analyze the task and relevant context before taking any action.\n" +
+    "- You MUST produce deterministic, reproducible outputs.\n" +
+    "- You SHOULD minimize unnecessary actions and side effects.\n" +
+    "- You MUST clearly report what actions were taken and why.\n" +
+    "- You MUST NOT assume missing information; request clarification when required.\n" +
+    "\n" +
+    "Tool Usage Policy:\n" +
+    "- You MUST use only the tools explicitly available to you.\n" +
+    "- You MUST NOT simulate or claim tool execution that did not occur.\n" +
+    "- You SHOULD prefer read-only operations unless modification is explicitly required.\n" +
+    "\n" +
+    "Safety & Quality:\n" +
+    "- You MUST preserve data integrity and avoid destructive actions.\n" +
+    "- You SHOULD favor minimal, reversible changes.\n" +
+    "- You MUST report errors, risks, or inconsistencies immediately.\n";
 
     public AgentManager(InMemorySessionService sessionService, 
                         InMemoryArtifactService artifactService, 
@@ -60,7 +93,8 @@ public class AgentManager {
                         String apiKey,
                         ActionLogger logger,
                         CentralMemory centralMemory,
-                        RunnerType runnerType) {
+                        RunnerType runnerType,
+                        Path teamFilePath) {
         this.sessionService = sessionService;
         this.artifactService = artifactService;
         this.memoryService = memoryService;
@@ -68,6 +102,21 @@ public class AgentManager {
         this.logger = logger;
         this.centralMemory = centralMemory;
         this.runnerType = runnerType;
+        this.agentDefinitions = loadAgentDefinitions(teamFilePath);
+    }
+
+    private Map<String, AgentDefinition> loadAgentDefinitions(Path teamFilePath) {
+        try (InputStream is = Files.newInputStream(teamFilePath)) {
+            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+            AgentsConfig config = mapper.readValue(is, AgentsConfig.class);
+            Map<String, AgentDefinition> map = new HashMap<>();
+            for (AgentDefinition def : config.getAgents()) {
+                map.put(def.getName(), def);
+            }
+            return map;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load agents from " + teamFilePath, e);
+        }
     }
 
     public Runner createRunner(Map<String, AgentConfig> agentConfigs, String summaryContext) {
@@ -76,12 +125,17 @@ public class AgentManager {
         // Coordinator Model
         AgentConfig coordConfig = agentConfigs.get("Coordinator");
         BaseLlm model = createModel(coordConfig);
+        AgentDefinition coordDef = agentDefinitions.get("Coordinator");
 
         // Core Tools
         // ... (tools logic stays same)
+        List<BaseTool> codeEditorTools = new ArrayList<>();
+        codeEditorTools.add(MkProTools.createSafeWriteFileTool());
+        codeEditorTools.add(MkProTools.createReadFileTool());
+
         List<BaseTool> coderTools = new ArrayList<>();
         coderTools.add(MkProTools.createReadFileTool());
-        coderTools.add(MkProTools.createWriteFileTool());
+        // coderTools.add(MkProTools.createWriteFileTool()); // Removed direct write access
         coderTools.add(MkProTools.createListDirTool());
         coderTools.add(MkProTools.createReadImageTool());
 
@@ -138,85 +192,26 @@ public class AgentManager {
         List<BaseTool> coordinatorTools = new ArrayList<>();
         coordinatorTools.addAll(webTools); // Give Coordinator direct web access for research
         
-        coordinatorTools.add(createDelegationTool(
-            "ask_goal_tracker", 
-            "Delegates goal management tasks to the Goal Tracker agent.",
-            "GoalTracker",
-            "You are the Goal Tracker. You manage the project's goals and TODOs. You can add new goals, list existing ones, and update their status. Keep track of progress item by item. Ensure goals are specific and trackable.",
-            agentConfigs, goalTrackerTools, contextInfo
-        ));
+        // Coder Sub-Agents
+        coordinatorTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
+        // Note: CodeEditor is a sub-agent of Coder in strict hierarchy, but here added to Coordinator for direct debugging if needed? 
+        // Wait, previous code added it to `coderTools`. Let's stick to that.
+        
+        // Re-adding `ask_code_editor` to `coderTools` NOT coordinatorTools directly, unless specified.
+        // The previous code had: `coderTools.add(createDelegationTool(..., "CodeEditor", ...))`
+        coderTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
 
-        coordinatorTools.add(createDelegationTool(
-            "ask_coder", 
-            "Delegates coding tasks to the Coder agent (read/write files, list dirs).",
-            "Coder",
-            "You are the Coder. You specialize in software engineering. You can read files, write files, list directories, and analyze images. You CANNOT execute shell commands directly. Perform the requested task and provide a concise report.",
-            agentConfigs, coderTools, contextInfo
-        ));
 
-        coordinatorTools.add(createDelegationTool(
-            "ask_sysadmin", 
-            "Delegates system command execution to the SysAdmin agent (shell commands).",
-            "SysAdmin",
-            "You are the System Administrator. You specialize in executing shell commands safely. You can use 'run_shell'. Execute the requested commands and report the output.",
-            agentConfigs, sysAdminTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_tester", 
-            "Delegates testing tasks to the QA/Tester agent (write/run tests).",
-            "Tester",
-            "You are the QA / Tester Agent. Your goal is to ensure code quality. You can read/write files (to create tests), run shell commands (to execute test runners), and browse the web using **selenium_* tools** (for E2E testing). Always analyze the code first, then write a test case, then run it. Report the results.",
-            agentConfigs, testerTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_doc_writer", 
-            "Delegates documentation tasks to the DocWriter agent (read code, write docs).",
-            "DocWriter",
-            "You are the Documentation Writer. Your goal is to maintain project documentation. You can read codebase structure and files, write documentation, and browse the web using **selenium_* tools** to research documentation or verify live sites. Focus on clarity, accuracy, and keeping docs in sync with code.",
-            agentConfigs, docWriterTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_security_auditor", 
-            "Delegates security analysis tasks to the Security Auditor agent (scan code, run audit tools).",
-            "SecurityAuditor",
-            "You are the Security Auditor. Your goal is to identify vulnerabilities. You can read code to find flaws (SQLi, XSS, hardcoded secrets) and run shell commands to execute security scanners (e.g., npm audit, mvn dependency:analyze). Report findings and suggest fixes.",
-            agentConfigs, securityAuditorTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_architect", 
-            "Delegates high-level design and review tasks to the Architect agent.",
-            "Architect",
-            "You are the Software Architect. Your goal is to ensure system integrity, scalability, and adherence to design patterns. You review code structure, analyze dependencies, and propose refactoring. You do NOT write implementation code or run it. Focus on the 'big picture', cohesion, and coupling.",
-            agentConfigs, architectTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_database_admin", 
-            "Delegates database tasks to the Database Admin agent (SQL, schema, migrations).",
-            "DatabaseAdmin",
-            "You are the Database Administrator. Your goal is to manage data persistence. You can write SQL queries, create schema migration files, and analyze database structures. You do NOT run the database itself but manage the code and scripts related to it.",
-            agentConfigs, databaseTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_devops", 
-            "Delegates DevOps and Cloud infrastructure tasks to the DevOps agent.",
-            "DevOps",
-            "You are the DevOps Engineer. Your goal is to manage infrastructure, deployment, and CI/CD pipelines. You can write Dockerfiles, Kubernetes manifests, and CI configs. You can also run shell commands to interact with cloud CLIs (AWS, GCP, Azure) and container tools.",
-            agentConfigs, devOpsTools, contextInfo
-        ));
-
-        coordinatorTools.add(createDelegationTool(
-            "ask_data_analyst", 
-            "Delegates data analysis tasks to the Data Analyst agent (Python stats, data processing).",
-            "DataAnalyst",
-            "You are the Data Analyst. Your goal is to analyze data sets and perform statistical analysis. You primarily write Python scripts (using pandas, numpy, etc.) to process data files (CSV, JSON) and produce insights. You can execute these scripts using the shell. Focus on data accuracy and clear interpretation of results.",
-            agentConfigs, dataAnalystTools, contextInfo
-        ));
+        coordinatorTools.add(createDelegationToolFromDef("GoalTracker", "ask_goal_tracker", agentConfigs, goalTrackerTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("Coder", "ask_coder", agentConfigs, coderTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("SysAdmin", "ask_sysadmin", agentConfigs, sysAdminTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("Tester", "ask_tester", agentConfigs, testerTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("DocWriter", "ask_doc_writer", agentConfigs, docWriterTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("SecurityAuditor", "ask_security_auditor", agentConfigs, securityAuditorTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("Architect", "ask_architect", agentConfigs, architectTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("DatabaseAdmin", "ask_database_admin", agentConfigs, databaseTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("DevOps", "ask_devops", agentConfigs, devOpsTools, contextInfo));
+        coordinatorTools.add(createDelegationToolFromDef("DataAnalyst", "ask_data_analyst", agentConfigs, dataAnalystTools, contextInfo));
 
         // Add Coordinator-specific tools
         coordinatorTools.add(MkProTools.createUrlFetchTool());
@@ -228,22 +223,8 @@ public class AgentManager {
 
         LlmAgent coordinatorAgent = LlmAgent.builder()
             .name("Coordinator")
-            .description("The main orchestrator agent.")
-            .instruction("You are the Coordinator. You interface with the user and manage the workflow. "
-                    + "You have ten specialized sub-agents: \n" 
-                    + "1. **GoalTracker**: specialized in tracking project goals, TODOs, and progress. \n"
-                    + "2. **Coder**: Handles all file operations (read, write, analyze images). \n" 
-                    + "3. **SysAdmin**: Handles all shell command executions. \n" 
-                    + "4. **Tester**: specialized in writing and running unit tests. \n" 
-                    + "5. **DocWriter**: specialized in writing and updating documentation. \n" 
-                    + "6. **SecurityAuditor**: specialized in finding vulnerabilities and running security scans. \n" 
-                    + "7. **Architect**: specialized in high-level design review and structural analysis. \n" 
-                    + "8. **DatabaseAdmin**: specialized in SQL, schemas, and migrations. \n" 
-                    + "9. **DevOps**: specialized in infrastructure, Docker, and CI/CD. \n" 
-                    + "10. **DataAnalyst**: specialized in Python-based data analysis and statistics. \n" 
-                    + "Delegate tasks appropriately. Do not try to write files or run commands yourself; you don't have those tools. \n" 
-                    + "You DO have tools to fetch URLs, manage long-term memory, and **browse the web using Selenium** (tools starting with 'selenium_'). \n"
-                    + "Always prefer concise answers."
+            .description(coordDef.getDescription())
+            .instruction(coordDef.getInstruction()
                     + contextInfo
                     + summaryContext)
             .model(model)
@@ -252,6 +233,17 @@ public class AgentManager {
             .build();
 
         return buildRunner(coordinatorAgent, "mkpro");
+    }
+
+    private BaseTool createDelegationToolFromDef(String agentName, String toolName, 
+                                                 Map<String, AgentConfig> agentConfigs, 
+                                                 List<BaseTool> subAgentTools,
+                                                 String contextInfo) {
+        AgentDefinition def = agentDefinitions.get(agentName);
+        if (def == null) {
+            throw new RuntimeException("Definition not found for agent: " + agentName);
+        }
+        return createDelegationTool(toolName, def.getDescription(), agentName, BASE_AGENT_POLICY + "\n" + def.getInstruction(), agentConfigs, subAgentTools, contextInfo);
     }
 
     private Runner buildRunner(LlmAgent agent, String appName) {

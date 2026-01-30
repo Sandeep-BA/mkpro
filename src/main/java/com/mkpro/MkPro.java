@@ -15,6 +15,7 @@ import com.mkpro.models.RunnerType;
 import com.mkpro.agents.AgentManager;
 
 import java.io.IOException;
+import java.io.File;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -29,9 +30,19 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+
+import com.google.genai.types.GenerateContentResponse;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.UserInterruptException;
+import org.jline.reader.EndOfFileException;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
+import io.reactivex.rxjava3.disposables.Disposable;
 
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
@@ -42,6 +53,7 @@ public class MkPro {
     // ANSI Color Constants
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BRIGHT_GREEN = "\u001b[92m";
+    public static final String ANSI_LIGHT_ORANGE = "\u001b[38;5;214m";
     public static final String ANSI_YELLOW = "\u001b[33m"; // Closest to Orange
     public static final String ANSI_BLUE = "\u001b[34m";
 
@@ -142,6 +154,9 @@ public class MkPro {
             System.exit(1);
         }
 
+        // Setup Teams
+        Path teamsDir = setupTeamsDir();
+
         // Load previous session summary if available
         String summaryContext = "";
         try {
@@ -162,46 +177,107 @@ public class MkPro {
         
         CentralMemory centralMemory = new CentralMemory();
         Session mkSession = sessionService.createSession("mkpro", "Coordinator").blockingGet();
+        mkSession.state().put("MKPRO", "REDBUS");
         ActionLogger logger = new ActionLogger("mkpro_logs.db");
         java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType = new java.util.concurrent.atomic.AtomicReference<>(initialRunnerType);
 
-        // Factory to create Runner with specific model and runner type
-        java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> runnerBuilder = (agentConfigs, rType) -> {
-            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType);
-            return am.createRunner(agentConfigs, finalSummaryContext);
-        };
-
-        // Function for backward compatibility or simple use cases
-        Function<Map<String, AgentConfig>, Runner> runnerFactory = (agentConfigs) -> 
-            runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-
         if (useUI) {
+            // UI Logic (Simplified for now, UI doesn't support dynamic team switching yet)
             if (isVerbose) System.out.println(ANSI_BLUE + "Launching Swing Companion UI..." + ANSI_RESET);
+            
+            // Default builder for UI
+            java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> uiRunnerBuilder = (agentConfigs, rType) -> {
+                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamsDir.resolve("default.yaml"));
+                return am.createRunner(agentConfigs, finalSummaryContext);
+            };
+
             Map<String, AgentConfig> uiConfigs = new java.util.HashMap<>();
             uiConfigs.put("Coordinator", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("Coder", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("SysAdmin", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("Tester", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("DocWriter", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("SecurityAuditor", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("Architect", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("DatabaseAdmin", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("DevOps", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("DataAnalyst", new AgentConfig(Provider.OLLAMA, modelName));
-            uiConfigs.put("GoalTracker", new AgentConfig(Provider.OLLAMA, modelName));
+            // For UI, we just put basic defaults.
+            uiConfigs.put("Coordinator", new AgentConfig(Provider.OLLAMA, modelName));
             
-            Runner runner = runnerBuilder.apply(uiConfigs, currentRunnerType.get());
+            Runner runner = uiRunnerBuilder.apply(uiConfigs, currentRunnerType.get());
             SwingCompanion gui = new SwingCompanion(runner, mkSession);
             gui.show();
         } else {
-            // Default provider OLLAMA
-            runConsoleLoop(runnerBuilder, currentRunnerType, modelName, Provider.OLLAMA, mkSession, sessionService, centralMemory, logger, isVerbose);
+            runConsoleLoop(apiKey, finalSummaryContext, currentRunnerType, modelName, Provider.OLLAMA, mkSession, sessionService, artifactService, memoryService, centralMemory, logger, isVerbose);
         }
         
         logger.close();
     }
 
-    private static void runConsoleLoop(java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> runnerBuilder, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
+    private static Path setupTeamsDir() {
+        try {
+            Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
+            if (!Files.exists(teamsDir)) {
+                Files.createDirectories(teamsDir);
+            }
+            
+            Path defaultTeamPath = teamsDir.resolve("default.yaml");
+            if (!Files.exists(defaultTeamPath)) {
+                try (var is = MkPro.class.getResourceAsStream("/teams/default.yaml")) {
+                    if (is != null) {
+                        Files.copy(is, defaultTeamPath);
+                    }
+                }
+            }
+            // Also copy minimal.yaml for reference
+            Path minimalTeamPath = teamsDir.resolve("minimal.yaml");
+            if (!Files.exists(minimalTeamPath)) {
+                try (var is = MkPro.class.getResourceAsStream("/teams/minimal.yaml")) {
+                    if (is != null) {
+                        Files.copy(is, minimalTeamPath);
+                    }
+                }
+            }
+            return teamsDir;
+        } catch (IOException e) {
+            System.err.println("Error setting up teams directory: " + e.getMessage());
+            return Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
+        }
+    }
+
+    private static void saveTeamSelection(String teamName) {
+        try {
+            Path mkproDir = Paths.get(System.getProperty("user.home"), ".mkpro");
+            if (!Files.exists(mkproDir)) Files.createDirectories(mkproDir);
+            Files.writeString(mkproDir.resolve("team_selection"), teamName);
+        } catch (IOException e) {}
+    }
+
+    private static String loadTeamSelection() {
+        try {
+            Path teamFile = Paths.get(System.getProperty("user.home"), ".mkpro", "team_selection");
+            if (Files.exists(teamFile)) return Files.readString(teamFile).trim();
+        } catch (IOException e) {}
+        return "default";
+    }
+
+    private static void saveSessionId(String sessionId) {
+        try {
+            Path mkproDir = Paths.get(System.getProperty("user.home"), ".mkpro");
+            if (!Files.exists(mkproDir)) {
+                Files.createDirectories(mkproDir);
+            }
+            Files.writeString(mkproDir.resolve("session_id"), sessionId);
+        } catch (IOException e) {
+            // Ignore errors
+        }
+    }
+
+    private static String loadSessionId() {
+        try {
+            Path sessionFile = Paths.get(System.getProperty("user.home"), ".mkpro", "session_id");
+            if (Files.exists(sessionFile)) {
+                return Files.readString(sessionFile).trim();
+            }
+        } catch (IOException e) {
+            // Ignore errors
+        }
+        return null;
+    }
+
+    private static void runConsoleLoop(String apiKey, String summaryContext, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, InMemoryArtifactService artifactService, InMemoryMemoryService memoryService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
         // Initialize default configs for all agents
         Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
         
@@ -217,6 +293,7 @@ public class MkPro {
         agentConfigs.put("DevOps", new AgentConfig(initialProvider, initialModelName));
         agentConfigs.put("DataAnalyst", new AgentConfig(initialProvider, initialModelName));
         agentConfigs.put("GoalTracker", new AgentConfig(initialProvider, initialModelName));
+        agentConfigs.put("CodeEditor", new AgentConfig(initialProvider, initialModelName));
 
         // Load overrides from Central Memory
         try {
@@ -239,32 +316,103 @@ public class MkPro {
             System.err.println(ANSI_BLUE + "Warning: Failed to load agent configs from central memory: " + e.getMessage() + ANSI_RESET);
         }
 
-        Runner runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-        Session currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
+        // Inject recent history from ActionLogger
+        List<String> recentLogs = logger.getRecentLogs(10);
+        StringBuilder historyContext = new StringBuilder();
+        if (!recentLogs.isEmpty()) {
+            historyContext.append("\n\nRECENT CONVERSATION HISTORY (From Logs):\n");
+            for (String log : recentLogs) {
+                historyContext.append(log).append("\n");
+            }
+        }
         
+        String augmentedContext = summaryContext + historyContext.toString();
+
+        // Runner Building Logic
+        java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
+        Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
+
+        java.util.function.Function<RunnerType, Runner> runnerFactory = (rType) -> {
+            Path teamPath = teamsDir.resolve(currentTeam.get() + ".yaml");
+            if (!Files.exists(teamPath)) {
+                System.out.println(ANSI_BLUE + "Team file not found: " + teamPath + ". Falling back to default.yaml" + ANSI_RESET);
+                teamPath = teamsDir.resolve("default.yaml");
+            }
+            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamPath);
+            return am.createRunner(agentConfigs, augmentedContext);
+        };
+
+        Runner runner = runnerFactory.apply(currentRunnerType.get());
+        
+        // Session Management
+        Session currentSession = null;
+        String savedSessionId = loadSessionId();
+        boolean sessionLoaded = false;
+
+        // Try to load existing session if using a persistent runner
+        if (savedSessionId != null && (currentRunnerType.get() == RunnerType.MAP_DB || currentRunnerType.get() == RunnerType.POSTGRES)) {
+             try {
+                 currentSession = runner.sessionService().getSession("mkpro", "Coordinator", savedSessionId, java.util.Optional.empty()).blockingGet();
+                 if (currentSession != null) {
+                     sessionLoaded = true;
+                 }
+             } catch (Exception e) {
+                 // Fallback
+             }
+        }
+
+        if (currentSession == null) {
+            currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
+            saveSessionId(currentSession.id());
+        } else {
+             if (verbose) System.out.println(ANSI_BLUE + "Resumed persistent session: " + currentSession.id() + ANSI_RESET);
+        }
+
+        Terminal terminal = null;
+        LineReader lineReader = null;
+        try {
+            terminal = TerminalBuilder.builder().system(true).build();
+            lineReader = LineReaderBuilder.builder().terminal(terminal).build();
+        } catch (IOException e) {
+            System.err.println("Error initializing JLine terminal: " + e.getMessage());
+            System.exit(1);
+        }
+        final Terminal fTerminal = terminal;
+        final LineReader fLineReader = lineReader;
+
         if (verbose) {
             System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
         }
-        System.out.println(ANSI_BLUE + "Type '/help' for a list of commands." + ANSI_RESET);
-        System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW); // Prompt Blue, Input Yellow
+        System.out.println(ANSI_BLUE + "Type '/help' for a list of commands. Press [ESC] to interrupt agent." + ANSI_RESET);
 
-        Scanner scanner = new Scanner(System.in);
-        while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            System.out.print(ANSI_RESET); // Reset after input
-            
-            if ("exit".equalsIgnoreCase(line.trim())) {
+        while (true) {
+            String line = null;
+            try {
+                // ANSI colors in prompt: \u001b[34m> \u001b[33m
+                line = fLineReader.readLine(ANSI_BLUE + "> " + ANSI_YELLOW); 
+                System.out.print(ANSI_RESET); // Reset after input
+            } catch (UserInterruptException e) {
+                continue; 
+            } catch (EndOfFileException e) {
                 break;
             }
 
-            if ("/h".equalsIgnoreCase(line.trim()) || "/help".equalsIgnoreCase(line.trim())) {
+            if (line == null) break;
+            
+            line = line.trim();
+            if ("exit".equalsIgnoreCase(line)) {
+                break;
+            }
+
+            if ("/h".equalsIgnoreCase(line) || "/help".equalsIgnoreCase(line)) {
                 System.out.println(ANSI_BLUE + "Available Commands:" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /config     - Configure a specific agent." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /runner     - Change the execution runner (InMemory, MapDB, Postgres)." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider (shortcut)." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /runner     - Change the execution runner." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /team       - Switch agent team definition." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /models     - List available models." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change Coordinator model." + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "  /status     - Show current configuration for all agents." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /status     - Show current configuration." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /stats      - Show agent usage statistics." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /init       - Initialize project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize project memory." + ANSI_RESET);
@@ -273,103 +421,138 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /compact    - Compact the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /summarize  - Generate session summary." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  exit        - Quit." + ANSI_RESET);
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
             
-            if ("/runner".equalsIgnoreCase(line.trim())) {
-                System.out.println(ANSI_BLUE + "Current Runner: " + currentRunnerType.get() + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "Select new Runner Type:" + ANSI_RESET);
+            if ("/team".equalsIgnoreCase(line)) {
+                try {
+                    File[] files = teamsDir.toFile().listFiles((d, name) -> name.endsWith(".yaml") || name.endsWith(".yml"));
+                    
+                    if (files == null || files.length == 0) {
+                        fTerminal.writer().println(ANSI_BLUE + "No team definitions found in " + teamsDir + ANSI_RESET);
+                        continue;
+                    }
+                    
+                    List<File> teamFiles = Arrays.asList(files);
+                    fTerminal.writer().println(ANSI_BLUE + "Select Team Definition:" + ANSI_RESET);
+                    String curTeam = currentTeam.get();
+                    
+                    for (int i = 0; i < teamFiles.size(); i++) {
+                        String name = teamFiles.get(i).getName().replaceFirst("[.][^.]+$", "");
+                        String marker = name.equals(curTeam) ? " *" : "";
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%s%n" + ANSI_RESET, i + 1, name, marker);
+                    }
+                    
+                    String selection = fLineReader.readLine(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
+                    
+                    try {
+                        int idx = Integer.parseInt(selection) - 1;
+                        if (idx >= 0 && idx < teamFiles.size()) {
+                            String newTeamName = teamFiles.get(idx).getName().replaceFirst("[.][^.]+$", "");
+                            currentTeam.set(newTeamName);
+                            saveTeamSelection(newTeamName);
+                            fTerminal.writer().println(ANSI_BLUE + "Switched to team: " + newTeamName + ". Rebuilding runner..." + ANSI_RESET);
+                            
+                            // Rebuild runner
+                            runner = runnerFactory.apply(currentRunnerType.get());
+                            fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new team definitions." + ANSI_RESET);
+                        } else {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
+                        }
+                    } catch (NumberFormatException e) {
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid input." + ANSI_RESET);
+                    }
+                } catch (Exception e) {
+                    fTerminal.writer().println(ANSI_BLUE + "Error switching teams: " + e.getMessage() + ANSI_RESET);
+                }
+                continue;
+            }
+
+            if ("/runner".equalsIgnoreCase(line)) {
+                fTerminal.writer().println(ANSI_BLUE + "Current Runner: " + currentRunnerType.get() + ANSI_RESET);
+                fTerminal.writer().println(ANSI_BLUE + "Select new Runner Type:" + ANSI_RESET);
                 RunnerType[] types = RunnerType.values();
                 for (int i = 0; i < types.length; i++) {
-                    System.out.println(ANSI_BRIGHT_GREEN + "[" + (i + 1) + "] " + types[i] + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "[" + (i + 1) + "] " + types[i] + ANSI_RESET);
                 }
-                System.out.print(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW);
-                String selection = scanner.nextLine().trim();
-                System.out.print(ANSI_RESET);
+                
+                String selection = fLineReader.readLine(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW).trim();
+                fTerminal.writer().print(ANSI_RESET);
 
                 try {
                     int idx = Integer.parseInt(selection) - 1;
                     if (idx >= 0 && idx < types.length) {
                         RunnerType newType = types[idx];
                         if (newType == currentRunnerType.get()) {
-                            System.out.println(ANSI_BLUE + "Already using " + newType + "." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Already using " + newType + "." + ANSI_RESET);
                         } else {
-                            System.out.println(ANSI_BLUE + "WARNING: Switching to " + newType + " will start a NEW session." + ANSI_RESET);
-                            System.out.println(ANSI_BLUE + "Current conversation history will not be carried over." + ANSI_RESET);
-                            System.out.print(ANSI_BLUE + "Do you want to continue? (y/N): " + ANSI_YELLOW);
-                            String confirm = scanner.nextLine().trim();
-                            System.out.print(ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "WARNING: Switching to " + newType + " will start a NEW session." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Current conversation history will not be carried over." + ANSI_RESET);
+                            
+                            String confirm = fLineReader.readLine(ANSI_BLUE + "Do you want to continue? (y/N): " + ANSI_YELLOW).trim();
+                            fTerminal.writer().print(ANSI_RESET);
                             
                             if ("y".equalsIgnoreCase(confirm) || "yes".equalsIgnoreCase(confirm)) {
                                 currentRunnerType.set(newType);
-                                System.out.println(ANSI_BLUE + "Switched to " + currentRunnerType.get() + ". Rebuilding runner..." + ANSI_RESET);
-                                runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
+                                fTerminal.writer().println(ANSI_BLUE + "Switched to " + currentRunnerType.get() + ". Rebuilding runner..." + ANSI_RESET);
+                                runner = runnerFactory.apply(newType);
                                 currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
-                                System.out.println(ANSI_BLUE + "Runner rebuilt. New Session ID: " + currentSession.id() + ANSI_RESET);
+                                saveSessionId(currentSession.id());
+                                fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt. New Session ID: " + currentSession.id() + ANSI_RESET);
                             } else {
-                                System.out.println(ANSI_BLUE + "Switch cancelled." + ANSI_RESET);
+                                fTerminal.writer().println(ANSI_BLUE + "Switch cancelled." + ANSI_RESET);
                             }
                         }
                     } else {
-                        System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                     }
                 } catch (Exception e) {
-                    System.out.println(ANSI_BLUE + "Invalid input or error rebuilding runner: " + e.getMessage() + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "Invalid input or error rebuilding runner: " + e.getMessage() + ANSI_RESET);
                 }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
 
-            if ("/stats".equalsIgnoreCase(line.trim())) {
+            if ("/stats".equalsIgnoreCase(line)) {
                 try {
                     List<AgentStat> stats = centralMemory.getAgentStats();
                     if (stats.isEmpty()) {
                         System.out.println(ANSI_BLUE + "No statistics available yet." + ANSI_RESET);
                     } else {
                         System.out.println(ANSI_BLUE + "Agent Statistics:" + ANSI_RESET);
-                        System.out.println(ANSI_BLUE + String.format("%-15s | %-10s | %-25s | %-8s | %-8s | %-8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + String.format("% -15s | % -10s | % -25s | % -8s | % -8s | % -8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
-                        
-                        // Show last 20 stats
                         int start = Math.max(0, stats.size() - 20);
                         for (int i = start; i < stats.size(); i++) {
                             AgentStat s = stats.get(i);
                             String modelShort = s.getModel();
                             if (modelShort.length() > 25) modelShort = modelShort.substring(0, 22) + "...";
-                            
-                            System.out.println(ANSI_BRIGHT_GREEN + String.format("%-15s | %-10s | %-25s | %-8dms | %-8s | %d/%d", 
-                                s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
+                            System.out.println(ANSI_BRIGHT_GREEN + String.format("% -15s | % -10s | % -25s | % -8dms | % -8s | %d/%d", s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
                         }
-                        
-                        // Summary
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "Total Invocations: " + stats.size() + ANSI_RESET);
                     }
                 } catch (Exception e) {
                     System.err.println(ANSI_BLUE + "Error retrieving stats: " + e.getMessage() + ANSI_RESET);
                 }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
 
-            if ("/status".equalsIgnoreCase(line.trim())) {
+            if ("/status".equalsIgnoreCase(line)) {
                 System.out.println(ANSI_BLUE + "Runner Type : " + ANSI_BRIGHT_GREEN + currentRunnerType.get() + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "Team Config : " + ANSI_BRIGHT_GREEN + currentTeam.get() + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "| Agent        | Provider   | Model                                    |" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 
                 List<String> sortedNames = new ArrayList<>(agentConfigs.keySet());
                 Collections.sort(sortedNames);
-                
                 for (String name : sortedNames) {
                     AgentConfig ac = agentConfigs.get(name);
-                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-40s " + ANSI_BLUE + "|%n" + ANSI_RESET, 
-                        name, ac.getProvider(), ac.getModelName());
+                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -40s " + ANSI_BLUE + "|%n" + ANSI_RESET, name, ac.getProvider(), ac.getModelName());
                 }
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 
-                // Memory Status
                 System.out.println("");
                 System.out.println(ANSI_BLUE + "Memory Status:" + ANSI_RESET);
                 System.out.println(ANSI_BRIGHT_GREEN + "  Local Session ID : " + currentSession.id() + ANSI_RESET);
@@ -381,29 +564,25 @@ public class MkPro {
                 } catch (Exception e) {
                     System.out.println(ANSI_BRIGHT_GREEN + "  Central Store    : [Error accessing DB] " + e.getMessage() + ANSI_RESET);
                 }
-                
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
 
-            if (line.trim().toLowerCase().startsWith("/config")) {
+            if (line.toLowerCase().startsWith("/config")) {
                 String[] parts = line.trim().split("\\s+");
                 
                 // Interactive Mode
                 if (parts.length == 1) {
-                    // ... (rest of config logic)
-
-                    System.out.println(ANSI_BLUE + "Select Agent to configure:" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "Select Agent to configure:" + ANSI_RESET);
                     List<String> agentNames = new ArrayList<>(agentConfigs.keySet());
                     Collections.sort(agentNames); 
                     for (int i = 0; i < agentNames.size(); i++) {
                         AgentConfig ac = agentConfigs.get(agentNames.get(i));
-                        System.out.printf(ANSI_BRIGHT_GREEN + "  [%d] %s (Current: %s - %s)%n" + ANSI_RESET, 
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s (Current: %s - %s)%n" + ANSI_RESET, 
                             i + 1, agentNames.get(i), ac.getProvider(), ac.getModelName());
                     }
-                    System.out.print(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW);
-                    String agentSelection = scanner.nextLine().trim();
-                    System.out.print(ANSI_RESET);
+                    
+                    String agentSelection = fLineReader.readLine(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
                     
                     if (agentSelection.isEmpty()) continue;
                     
@@ -416,20 +595,19 @@ public class MkPro {
                     } catch (NumberFormatException e) {}
                     
                     if (selectedAgent == null) {
-                        System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
-                        System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                         continue;
                     }
 
                     // 2. Select Provider
-                    System.out.println(ANSI_BLUE + "Select Provider for " + selectedAgent + ":" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "Select Provider for " + selectedAgent + ":" + ANSI_RESET);
                     Provider[] providers = Provider.values();
                     for (int i = 0; i < providers.length; i++) {
-                        System.out.printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, providers[i]);
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, providers[i]);
                     }
-                    System.out.print(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW);
-                    String providerSelection = scanner.nextLine().trim();
-                    System.out.print(ANSI_RESET);
+                    
+                    String providerSelection = fLineReader.readLine(ANSI_BLUE + "Enter selection (number): " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
                     
                     if (providerSelection.isEmpty()) continue;
                     
@@ -442,8 +620,7 @@ public class MkPro {
                     } catch (NumberFormatException e) {}
                     
                     if (selectedProvider == null) {
-                        System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
-                        System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                        fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                         continue;
                     }
 
@@ -454,7 +631,7 @@ public class MkPro {
                     } else if (selectedProvider == Provider.BEDROCK) {
                         availableModels.addAll(BEDROCK_MODELS);
                     } else if (selectedProvider == Provider.OLLAMA) {
-                        System.out.println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
                         try {
                             HttpClient client = HttpClient.newHttpClient();
                             HttpRequest request = HttpRequest.newBuilder()
@@ -468,21 +645,20 @@ public class MkPro {
                                 while (matcher.find()) availableModels.add(matcher.group(1));
                             }
                         } catch (Exception e) {
-                            System.out.println(ANSI_BLUE + "Could not fetch Ollama models. You can type the model name manually." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Could not fetch Ollama models. You can type the model name manually." + ANSI_RESET);
                         }
                     }
 
                     String selectedModel = null;
                     if (!availableModels.isEmpty()) {
-                        System.out.println(ANSI_BLUE + "Select Model:" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "Select Model:" + ANSI_RESET);
                         for (int i = 0; i < availableModels.size(); i++) {
-                            System.out.printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, availableModels.get(i));
+                            fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%n" + ANSI_RESET, i + 1, availableModels.get(i));
                         }
-                        System.out.println(ANSI_BRIGHT_GREEN + "  [M] Manual Entry" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [M] Manual Entry" + ANSI_RESET);
                         
-                        System.out.print(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW);
-                        String modelSel = scanner.nextLine().trim();
-                        System.out.print(ANSI_RESET);
+                        String modelSel = fLineReader.readLine(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
                         
                         if (!"M".equalsIgnoreCase(modelSel)) {
                             try {
@@ -495,25 +671,23 @@ public class MkPro {
                     }
 
                     if (selectedModel == null) {
-                        System.out.print(ANSI_BLUE + "Enter model name manually: " + ANSI_YELLOW);
-                        selectedModel = scanner.nextLine().trim();
-                        System.out.print(ANSI_RESET);
+                        selectedModel = fLineReader.readLine(ANSI_BLUE + "Enter model name manually: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
                     }
 
                     if (selectedModel.isEmpty()) {
-                         System.out.println(ANSI_BLUE + "Model selection cancelled." + ANSI_RESET);
-                         System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
+                         fTerminal.writer().println(ANSI_BLUE + "Model selection cancelled." + ANSI_RESET);
                          continue;
                     }
 
                     // Apply Configuration
                     agentConfigs.put(selectedAgent, new AgentConfig(selectedProvider, selectedModel));
                     centralMemory.saveAgentConfig(selectedAgent, selectedProvider.name(), selectedModel);
-                    System.out.println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                     
                     if ("Coordinator".equalsIgnoreCase(selectedAgent)) {
-                        runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-                        System.out.println(ANSI_BLUE + "Coordinator runner rebuilt." + ANSI_RESET);
+                        runner = runnerFactory.apply(currentRunnerType.get());
+                        fTerminal.writer().println(ANSI_BLUE + "Coordinator runner rebuilt." + ANSI_RESET);
                     }
 
                 } else if (parts.length >= 3) {
@@ -522,7 +696,7 @@ public class MkPro {
                     String providerStr = parts[2].toUpperCase();
                     
                     if (!agentConfigs.containsKey(agentName)) {
-                        System.out.println(ANSI_BLUE + "Unknown agent: " + agentName + ". Available: " + agentConfigs.keySet() + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "Unknown agent: " + agentName + ". Available: " + agentConfigs.keySet() + ANSI_RESET);
                     } else {
                         try {
                             Provider newProvider = Provider.valueOf(providerStr);
@@ -536,270 +710,55 @@ public class MkPro {
 
                             agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
                             centralMemory.saveAgentConfig(agentName, newProvider.name(), newModel);
-                            System.out.println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
                             
                             if ("Coordinator".equalsIgnoreCase(agentName)) {
-                                runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
+                                runner = runnerFactory.apply(currentRunnerType.get());
                             }
                         } catch (IllegalArgumentException e) {
-                            System.out.println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, or BEDROCK." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, or BEDROCK." + ANSI_RESET);
                         }
                     }
                 } else {
-                     System.out.println(ANSI_BLUE + "Usage: /config (interactive) OR /config <Agent> <Provider> [Model]" + ANSI_RESET);
+                     fTerminal.writer().println(ANSI_BLUE + "Usage: /config (interactive) OR /config <Agent> <Provider> [Model]" + ANSI_RESET);
                 }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
 
-            if ("/provider".equalsIgnoreCase(line.trim())) {
-                AgentConfig coordConfig = agentConfigs.get("Coordinator");
-                System.out.println(ANSI_BLUE + "Current Coordinator Provider: " + coordConfig.getProvider() + ANSI_RESET);
-                System.out.println(ANSI_BLUE + "Select new provider for Coordinator:" + ANSI_RESET);
-                System.out.println(ANSI_BRIGHT_GREEN + "[1] OLLAMA" + ANSI_RESET);
-                System.out.println(ANSI_BRIGHT_GREEN + "[2] GEMINI" + ANSI_RESET);
-                System.out.println(ANSI_BRIGHT_GREEN + "[3] BEDROCK" + ANSI_RESET);
-                System.out.print(ANSI_BLUE + "Enter selection: " + ANSI_YELLOW);
-                String selection = scanner.nextLine().trim();
-                System.out.print(ANSI_RESET);
-                
-                Provider newProvider = null;
-                String newModel = coordConfig.getModelName();
-
-                if ("1".equals(selection)) {
-                    newProvider = Provider.OLLAMA;
-                    System.out.println(ANSI_BLUE + "Switched to OLLAMA." + ANSI_RESET);
-                } else if ("2".equals(selection)) {
-                    newProvider = Provider.GEMINI;
-                    newModel = "gemini-1.5-flash";
-                    System.out.println(ANSI_BLUE + "Switched to GEMINI. Defaulting to 'gemini-1.5-flash'." + ANSI_RESET);
-                } else if ("3".equals(selection)) {
-                    newProvider = Provider.BEDROCK;
-                    newModel = "anthropic.claude-3-sonnet-20240229-v1:0";
-                    System.out.println(ANSI_BLUE + "Switched to BEDROCK. Defaulting to 'anthropic.claude-3-sonnet-20240229-v1:0'." + ANSI_RESET);
-                } else {
-                    System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
-                }
-                
-                if (newProvider != null) {
-                    agentConfigs.put("Coordinator", new AgentConfig(newProvider, newModel));
-                    centralMemory.saveAgentConfig("Coordinator", newProvider.name(), newModel);
-                    runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-                }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
-                continue;
-            }
-
-            if ("/init".equalsIgnoreCase(line.trim())) {
-                String currentPath = Paths.get("").toAbsolutePath().toString();
-                String existing = centralMemory.getMemory(currentPath);
-                if (existing != null && !existing.isBlank()) {
-                    System.out.println(ANSI_BLUE + "Project already initialized in central memory." + ANSI_RESET);
-                    System.out.println(ANSI_BLUE + "Use '/re-init' to force a fresh summary." + ANSI_RESET);
-                    System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
-                    continue;
-                }
-                line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
-                System.out.println(ANSI_BLUE + "System: Initializing project memory..." + ANSI_RESET);
-            }
-
-            if ("/re-init".equalsIgnoreCase(line.trim())) {
-                 line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
-                 System.out.println(ANSI_BLUE + "System: Re-initializing project memory..." + ANSI_RESET);
-            }
-
-            if ("/remember".equalsIgnoreCase(line.trim())) {
-                 line = "Analyze the current project files (use `list_directory` and `read_file` as needed) to build a comprehensive summary of the project's purpose, architecture, and current state. Then, save this summary to the central database using the `save_central_memory` tool.";
-                 System.out.println(ANSI_BLUE + "System: Initiating project analysis and memory storage..." + ANSI_RESET);
-            }
-
-            if ("/models".equalsIgnoreCase(line.trim())) {
-                AgentConfig coordConfig = agentConfigs.get("Coordinator");
-                if (coordConfig.getProvider() == Provider.GEMINI) {
-                    System.out.println(ANSI_BLUE + "Gemini Models:" + ANSI_RESET);
-                    for (String m : GEMINI_MODELS) {
-                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.getModelName()) ? " (current)" : "") + ANSI_RESET);
-                    }
-                } else if (coordConfig.getProvider() == Provider.BEDROCK) {
-                    System.out.println(ANSI_BLUE + "Bedrock Models:" + ANSI_RESET);
-                    for (String m : BEDROCK_MODELS) {
-                        System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.getModelName()) ? " (current)" : "") + ANSI_RESET);
-                    }
-                } else {
-                    System.out.println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
-                    try {
-                        HttpClient client = HttpClient.newHttpClient();
-                        HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create("http://localhost:11434/api/tags"))
-                                .timeout(Duration.ofSeconds(10))
-                                .GET()
-                                .build();
-
-                        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                        if (response.statusCode() == 200) {
-                            System.out.println(ANSI_BLUE + "Ollama Models:" + ANSI_RESET);
-                            String body = response.body();
-                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\"name\":\"([^\"]+)\"");
-                            java.util.regex.Matcher matcher = pattern.matcher(body);
-                            boolean found = false;
-                            while (matcher.find()) {
-                                String m = matcher.group(1);
-                                System.out.println(ANSI_BRIGHT_GREEN + "  - " + m + (m.equals(coordConfig.getModelName()) ? " (current)" : "") + ANSI_RESET);
-                                found = true;
-                            }
-                            if (!found) {
-                                System.out.println(ANSI_BLUE + "  No models found." + ANSI_RESET);
-                            }
-                        } else {
-                            System.err.println(ANSI_BLUE + "Error: Ollama returned status " + response.statusCode() + ANSI_RESET);
-                        }
-                    } catch (Exception e) {
-                        System.err.println(ANSI_BLUE + "Error fetching models: " + e.getMessage() + ANSI_RESET);
-                    }
-                }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
-                continue;
-            }
-            
-            if ("/model".equalsIgnoreCase(line.trim())) {
-                AgentConfig coordConfig = agentConfigs.get("Coordinator");
-                List<String> availableModels = new ArrayList<>();
-                if (coordConfig.getProvider() == Provider.GEMINI) {
-                    availableModels.addAll(GEMINI_MODELS);
-                } else if (coordConfig.getProvider() == Provider.BEDROCK) {
-                    availableModels.addAll(BEDROCK_MODELS);
-                } else {
-                    System.out.println(ANSI_BLUE + "Fetching available Ollama models for selection..." + ANSI_RESET);
-                    try {
-                        HttpClient client = HttpClient.newHttpClient();
-                        HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create("http://localhost:11434/api/tags"))
-                                .timeout(Duration.ofSeconds(10))
-                                .GET()
-                                .build();
-
-                        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                        if (response.statusCode() == 200) {
-                            String body = response.body();
-                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\"name\":\"([^\"]+)\"");
-                            java.util.regex.Matcher matcher = pattern.matcher(body);
-                            while (matcher.find()) {
-                                availableModels.add(matcher.group(1));
-                            }
-                        } else {
-                            System.err.println(ANSI_BLUE + "Error: Ollama returned status " + response.statusCode() + ANSI_RESET);
-                        }
-                    } catch (Exception e) {
-                        System.err.println(ANSI_BLUE + "Error fetching models: " + e.getMessage() + ANSI_RESET);
-                    }
-                }
-
-                if (availableModels.isEmpty()) {
-                    System.out.println(ANSI_BLUE + "No models available for selection." + ANSI_RESET);
-                } else {
-                    System.out.println(ANSI_BLUE + "Select a model (" + coordConfig.getProvider() + ")" + ANSI_RESET);
-                    int defaultIndex = -1;
-                    for (int i = 0; i < availableModels.size(); i++) {
-                        String m = availableModels.get(i);
-                        String marker = "";
-                        if (m.equals(coordConfig.getModelName())) {
-                            marker = " (current)";
-                            defaultIndex = i + 1;
-                        }
-                        System.out.println(ANSI_BRIGHT_GREEN + "[" + (i + 1) + "] " + m + marker + ANSI_RESET);
-                    }
-                    
-                    System.out.print(ANSI_BLUE + "Enter selection (default " + (defaultIndex != -1 ? defaultIndex : "none") + "): " + ANSI_YELLOW);
-                    String selection = scanner.nextLine().trim();
-                    System.out.print(ANSI_RESET);
-                    
-                    if (selection.isEmpty()) {
-                        if (defaultIndex != -1) {
-                            System.out.println(ANSI_BLUE + "Keeping current model: " + coordConfig.getModelName() + ANSI_RESET);
-                        } else {
-                            System.out.println(ANSI_BLUE + "No selection made." + ANSI_RESET);
-                        }
-                    } else {
-                        try {
-                            int index = Integer.parseInt(selection);
-                            if (index >= 1 && index <= availableModels.size()) {
-                                String newModel = availableModels.get(index - 1);
-                                if (!newModel.equals(coordConfig.getModelName())) {
-                                    System.out.println(ANSI_BLUE + "Switching Coordinator model to: " + newModel + "..." + ANSI_RESET);
-                                    agentConfigs.put("Coordinator", new AgentConfig(coordConfig.getProvider(), newModel));
-                                    centralMemory.saveAgentConfig("Coordinator", coordConfig.getProvider().name(), newModel);
-                                    runner = runnerBuilder.apply(agentConfigs, currentRunnerType.get());
-                                    System.out.println(ANSI_BLUE + "Model switched successfully." + ANSI_RESET);
-                                } else {
-                                    System.out.println(ANSI_BLUE + "Model already selected." + ANSI_RESET);
-                                }
-                            } else {
-                                System.out.println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
-                            }
-                        } catch (NumberFormatException e) {
-                            System.out.println(ANSI_BLUE + "Invalid input." + ANSI_RESET);
-                        }
-                    }
-                }
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
-                continue;
-            }
-
-            if ("/reset".equalsIgnoreCase(line.trim())) {
+            if ("/reset".equalsIgnoreCase(line)) {
                 currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
+                saveSessionId(currentSession.id());
                 System.out.println(ANSI_BLUE + "System: Session reset. New session ID: " + currentSession.id() + ANSI_RESET);
                 logger.log("SYSTEM", "Session reset by user.");
-                System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                 continue;
             }
 
-            if ("/compact".equalsIgnoreCase(line.trim())) {
+            if ("/compact".equalsIgnoreCase(line)) {
                 System.out.println(ANSI_BLUE + "System: Compacting session..." + ANSI_RESET);
-                
-                // 1. Request Summary from Current Session
                 StringBuilder summaryBuilder = new StringBuilder();
-                Content summaryRequest = Content.builder()
-                        .role("user")
-                        .parts(Collections.singletonList(Part.fromText(
-                            "Summarize our conversation so far, focusing on key technical decisions, " +
-                            "user preferences, and current state. " +
-                            "This summary will be used to initialize a new, compacted session."
-                        )))
-                        .build();
-
+                Content summaryRequest = Content.builder().role("user").parts(Collections.singletonList(Part.fromText("Summarize our conversation so far."))).build();
                 try {
                     runner.runAsync("Coordinator", currentSession.id(), summaryRequest)
                         .filter(event -> event.content().isPresent())
-                        .blockingForEach(event -> 
-                            event.content().flatMap(Content::parts).orElse(Collections.emptyList())
-                                .forEach(p -> p.text().ifPresent(summaryBuilder::append))
-                        );
+                        .blockingForEach(event -> event.content().flatMap(Content::parts).orElse(Collections.emptyList()).forEach(p -> p.text().ifPresent(summaryBuilder::append)));
                 } catch (Exception e) {
                      System.err.println(ANSI_BLUE + "Error generating summary: " + e.getMessage() + ANSI_RESET);
-                     System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                      continue;
                 }
-                
                 String summary = summaryBuilder.toString();
                 if (summary.isBlank()) {
                      System.err.println(ANSI_BLUE + "Error: Agent returned empty summary." + ANSI_RESET);
-                     System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW);
                      continue;
                 }
-
-                // 2. Create New Session
                 currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
-                String newSessionId = currentSession.id();
-                
-                System.out.println(ANSI_BLUE + "System: Session compacted. New Session ID: " + newSessionId + ANSI_RESET);
-                logger.log("SYSTEM", "Session compacted. Summary: " + summary);
-                
-                // 3. Seed New Session by updating 'line' and falling through
-                line = "Here is the summary of the previous session. Please use this as context for our continued conversation:\n\n" + summary;
+                saveSessionId(currentSession.id());
+                System.out.println(ANSI_BLUE + "System: Session compacted. New Session ID: " + currentSession.id() + ANSI_RESET);
+                logger.log("SYSTEM", "Session compacted.");
+                line = "Here is the summary of the previous session:\n\n" + summary;
             }
 
-            if ("/summarize".equalsIgnoreCase(line.trim())) {
-                 line = "Retrieve the action logs using the 'get_action_logs' tool. Then, summarize the key technical context, user preferences, and important decisions from these logs. Finally, write this summary to a file named 'session_summary.txt' using the 'write_file' tool. The summary should be concise and suitable for priming a future session.";
+            if ("/summarize".equalsIgnoreCase(line)) {
+                 line = "Retrieve the action logs using the 'get_action_logs' tool. Then, summarize the key technical context, user preferences, and important decisions. Write this summary to 'session_summary.txt'.";
                  System.out.println(ANSI_BLUE + "System: Requesting session summary..." + ANSI_RESET);
             }
 
@@ -808,117 +767,109 @@ public class MkPro {
             java.util.List<Part> parts = new java.util.ArrayList<>();
             parts.add(Part.fromText(line));
 
-            // Detect image paths in the input
+            // Image detection logic
             String[] tokens = line.split("\\s+");
             for (String token : tokens) {
                 String lowerToken = token.toLowerCase();
-                if (lowerToken.endsWith(".jpg") || lowerToken.endsWith(".jpeg") || 
-                    lowerToken.endsWith(".png") || lowerToken.endsWith(".webp")) {
+                if (lowerToken.endsWith(".jpg") || lowerToken.endsWith(".jpeg") || lowerToken.endsWith(".png") || lowerToken.endsWith(".webp")) {
                     try {
                         Path imagePath = Paths.get(token);
                         if (Files.exists(imagePath)) {
-                            if (verbose) System.out.println(ANSI_BLUE + "[DEBUG] Feeding image to agent: " + token + ANSI_RESET);
+                            if (verbose) System.out.println(ANSI_BLUE + "[DEBUG] Feeding image: " + token + ANSI_RESET);
                             byte[] rawBytes = Files.readAllBytes(imagePath);
-                            
-                            // User previously suggested Base64, but "failed to process inputs: image: unknown format"
-                            // strongly suggests the backend received double-encoded data or expects raw bytes.
-                            // Let's try sending RAW BYTES. Part.fromBytes usually expects raw data.
-                            
-                            if (verbose) {
-                                System.out.print(ANSI_BLUE + "[DEBUG] First 10 bytes: ");
-                                for(int i=0; i<Math.min(10, rawBytes.length); i++) {
-                                    System.out.printf("%02X ", rawBytes[i]);
-                                }
-                                System.out.println(ANSI_RESET);
-                            }
-
-                            String mimeType = "image/jpeg";
-                            if (lowerToken.endsWith(".png")) mimeType = "image/png";
-                            else if (lowerToken.endsWith(".webp")) mimeType = "image/webp";
-                            
+                            String mimeType = lowerToken.endsWith(".png") ? "image/png" : (lowerToken.endsWith(".webp") ? "image/webp" : "image/jpeg");
                             parts.add(Part.fromBytes(rawBytes, mimeType));
                         }
                     } catch (Exception e) {
-                        if (verbose) System.err.println(ANSI_BLUE + "Warning: Could not read image file " + token + ": " + e.getMessage() + ANSI_RESET);
+                        if (verbose) System.err.println(ANSI_BLUE + "Warning: Could not read image " + token + ANSI_RESET);
                     }
                 }
             }
 
-            Content content = Content.builder()
-                    .role("user")
-                    .parts(parts)
-                    .build();
+            Content content = Content.builder().role("user").parts(parts).build();
 
-            // Start Spinner
+            // Interruption & Execution Logic
             AtomicBoolean isThinking = new AtomicBoolean(true);
-            Thread spinnerThread = new Thread(() -> {
-                String[] syms = {"|", "/", "-", "\\"};
-                int i = 0;
-                while (isThinking.get()) {
-                    System.out.print("\r" + ANSI_BLUE + "Thinking " + syms[i++ % syms.length] + ANSI_RESET);
-                    try { Thread.sleep(100); } catch (InterruptedException e) { break; }
-                }
-                // Clear spinner line
-                System.out.print("\r" + " ".repeat(20) + "\r"); 
-            });
-            spinnerThread.start();
-
-            try {
-                StringBuilder responseBuilder = new StringBuilder();
-                
-                runner.runAsync("Coordinator", currentSession.id(), content)
-                        .filter(event -> event.content().isPresent())
-                        .blockingForEach(event -> {
-                            if (isThinking.getAndSet(false)) {
-                                // Stop spinner logic
-                                spinnerThread.interrupt(); 
-                                try { spinnerThread.join(); } catch (InterruptedException ignored) {}
-                                System.out.print("\r" + " ".repeat(20) + "\r"); // Ensure clear
-                                
-                                System.out.print(ANSI_BRIGHT_GREEN); // Start Agent Bright Green
-                            }
-                            
-                            event.content()
-                                .flatMap(Content::parts)
-                                .orElse(Collections.emptyList())
-                                .forEach(part -> 
-                                    part.text().ifPresent(text -> {
-                                        System.out.print(text);
-                                        responseBuilder.append(text);
-                                    })
-                                );
-                        });
-                
-                // Handle case where no content was returned (thinking still true)
-                if (isThinking.getAndSet(false)) {
-                     spinnerThread.interrupt();
-                     try { spinnerThread.join(); } catch (InterruptedException ignored) {}
-                     System.out.print("\r" + " ".repeat(20) + "\r");
-                }
-
-                System.out.println(ANSI_RESET); // End Agent Green
-                logger.log("AGENT", responseBuilder.toString());
-            } catch (Exception e) {
-                // Ensure spinner stops on error
-                if (isThinking.getAndSet(false)) {
-                     spinnerThread.interrupt();
-                     try { spinnerThread.join(); } catch (InterruptedException ignored) {}
-                     System.out.print("\r" + " ".repeat(20) + "\r");
-                }
-                
-                System.err.println(ANSI_BLUE + "Error processing request: " + e.getMessage() + ANSI_RESET);
-                if (e.getMessage() != null && e.getMessage().contains("Session not found")) {
-                    System.err.println(ANSI_BRIGHT_GREEN + "Tip: The current runner (" + currentRunnerType.get() + ") might be having trouble persisting the session." + ANSI_RESET);
-                    System.err.println(ANSI_BRIGHT_GREEN + "Try switching back to IN_MEMORY using '/runner'." + ANSI_RESET);
-                }
-                if (verbose) {
-                    e.printStackTrace();
-                }
-                logger.log("ERROR", e.getMessage());
-            }
-
-            System.out.print(ANSI_BLUE + "> " + ANSI_YELLOW); // Prompt Blue, Input Yellow
-        }
+            AtomicBoolean isCancelled = new AtomicBoolean(false);
+            
+            StringBuilder responseBuilder = new StringBuilder();
+            Disposable agentSubscription = null;
+            
+                                    try {
+                                        // Using var for type inference to match ADK return type exactly
+                                        var flowable = runner.runAsync("Coordinator", currentSession.id(), content);
+                                        
+                                        agentSubscription = flowable
+                                            .filter(event -> event.content().isPresent())
+                                            .subscribe(
+                                                event -> {
+                                                                                event.content().flatMap(Content::parts).orElse(Collections.emptyList()).forEach(part -> 
+                                                                                    part.text().ifPresent(text -> {
+                                                                                        fTerminal.writer().print(ANSI_LIGHT_ORANGE + text);
+                                                                                        fTerminal.writer().flush();
+                                                                                        responseBuilder.append(text);
+                                                                                    })
+                                                                                );
+                                                                            },
+                                                                            error -> {
+                                                                                isThinking.set(false);
+                                                                                fTerminal.writer().println(ANSI_BLUE + "\nError processing request: " + error.getMessage() + ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                logger.log("ERROR", error.getMessage());
+                                                                            },
+                                                                            () -> {
+                                                                                isThinking.set(false);
+                                                                                fTerminal.writer().println(ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                logger.log("AGENT", responseBuilder.toString());
+                                                                            }
+                                                                        );
+                                                    
+                                                                    // Initial color set
+                                                                    fTerminal.writer().print(ANSI_LIGHT_ORANGE);
+                                                                    fTerminal.writer().flush();
+                                                                    
+                                                                    // Spinner chars
+                                                                    String[] syms = {"|", "/", "-", "\\"};
+                                                                    int spinnerIdx = 0;
+                                                                    long lastSpinnerUpdate = 0;
+                                                    
+                                                                    while (isThinking.get()) {
+                                                                        // Non-blocking read with timeout
+                                                                        int c = fTerminal.reader().read(10); 
+                                                                        if (c == 27) { // ESC
+                                                                            isCancelled.set(true);
+                                                                            agentSubscription.dispose();
+                                                                            isThinking.set(false);
+                                                                            fTerminal.writer().print(ANSI_RESET);
+                                                                            fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
+                                                                            fTerminal.writer().flush();
+                                                                            logger.log("SYSTEM", "User interrupted the agent.");
+                                                                            break;
+                                                                        }
+                                                                        
+                                                                        // Update spinner only if no response has started streaming yet
+                                                                        if (responseBuilder.length() == 0) {
+                                                                            long now = System.currentTimeMillis();
+                                                                            if (now - lastSpinnerUpdate > 100) {
+                                                                                fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                lastSpinnerUpdate = now;
+                                                                            }
+                                                                        } else {
+                                                                            // Once response starts, ensure we cleared the spinner line once
+                                                                            if (spinnerIdx != -1) {
+                                                                                 fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
+                                                                                 fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
+                                                                                 fTerminal.writer().flush();
+                                                                                 spinnerIdx = -1; // Flag that we are done spinning
+                                                                            }
+                                                                        }
+                                                                    }
+                        
+                                    } catch (Exception e) {
+                                        System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
+                                    }        }
         
         if (verbose) System.out.println(ANSI_BLUE + "Goodbye!" + ANSI_RESET);
     }
