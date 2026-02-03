@@ -217,25 +217,47 @@ public class AgentManager {
         coordinatorTools.addAll(webTools); // Give Coordinator direct web access for research
         
         // Coder Sub-Agents
-        coordinatorTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
-        // Note: CodeEditor is a sub-agent of Coder in strict hierarchy, but here added to Coordinator for direct debugging if needed? 
-        // Wait, previous code added it to `coderTools`. Let's stick to that.
-        
-        // Re-adding `ask_code_editor` to `coderTools` NOT coordinatorTools directly, unless specified.
-        // The previous code had: `coderTools.add(createDelegationTool(..., "CodeEditor", ...))`
-        coderTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
+        BaseTool codeEditorTool = createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo);
+        if (codeEditorTool != null) {
+            coordinatorTools.add(codeEditorTool);
+            coderTools.add(codeEditorTool);
+        }
 
+        // Add optional delegation tools
+        List<String> optionalAgents = new ArrayList<>();
+        optionalAgents.add("GoalTracker:ask_goal_tracker");
+        optionalAgents.add("Coder:ask_coder");
+        optionalAgents.add("SysAdmin:ask_sysadmin");
+        optionalAgents.add("Tester:ask_tester");
+        optionalAgents.add("DocWriter:ask_doc_writer");
+        optionalAgents.add("SecurityAuditor:ask_security_auditor");
+        optionalAgents.add("Architect:ask_architect");
+        optionalAgents.add("DatabaseAdmin:ask_database_admin");
+        optionalAgents.add("DevOps:ask_devops");
+        optionalAgents.add("DataAnalyst:ask_data_analyst");
 
-        coordinatorTools.add(createDelegationToolFromDef("GoalTracker", "ask_goal_tracker", agentConfigs, goalTrackerTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Coder", "ask_coder", agentConfigs, coderTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("SysAdmin", "ask_sysadmin", agentConfigs, sysAdminTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Tester", "ask_tester", agentConfigs, testerTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DocWriter", "ask_doc_writer", agentConfigs, docWriterTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("SecurityAuditor", "ask_security_auditor", agentConfigs, securityAuditorTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Architect", "ask_architect", agentConfigs, architectTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DatabaseAdmin", "ask_database_admin", agentConfigs, databaseTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DevOps", "ask_devops", agentConfigs, devOpsTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DataAnalyst", "ask_data_analyst", agentConfigs, dataAnalystTools, contextInfo));
+        Map<String, List<BaseTool>> toolMapping = new HashMap<>();
+        toolMapping.put("GoalTracker", goalTrackerTools);
+        toolMapping.put("Coder", coderTools);
+        toolMapping.put("SysAdmin", sysAdminTools);
+        toolMapping.put("Tester", testerTools);
+        toolMapping.put("DocWriter", docWriterTools);
+        toolMapping.put("SecurityAuditor", securityAuditorTools);
+        toolMapping.put("Architect", architectTools);
+        toolMapping.put("DatabaseAdmin", databaseTools);
+        toolMapping.put("DevOps", devOpsTools);
+        toolMapping.put("DataAnalyst", dataAnalystTools);
+
+        for (String entry : optionalAgents) {
+            String[] parts = entry.split(":");
+            String agentName = parts[0];
+            String toolName = parts[1];
+            
+            BaseTool tool = createDelegationToolFromDef(agentName, toolName, agentConfigs, toolMapping.get(agentName), contextInfo);
+            if (tool != null) {
+                coordinatorTools.add(tool);
+            }
+        }
 
         // Add Coordinator-specific tools
         coordinatorTools.add(MkProTools.createUrlFetchTool());
@@ -268,7 +290,8 @@ public class AgentManager {
                                                  String contextInfo) {
         AgentDefinition def = agentDefinitions.get(agentName);
         if (def == null) {
-            throw new RuntimeException("Definition not found for agent: " + agentName);
+            // Silently skip missing agents
+            return null;
         }
         return createDelegationTool(toolName, def.getDescription(), agentName, BASE_AGENT_POLICY + "\n" + def.getInstruction(), agentConfigs, subAgentTools, contextInfo);
     }

@@ -76,19 +76,46 @@ public class CentralMemory {
         }
     }
 
-    public void saveAgentConfig(String agentName, String provider, String modelName) {
+    public void saveAgentConfig(String teamName, String agentName, String provider, String modelName) {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)
                     .valueSerializer(Serializer.STRING)
                     .createOrOpen();
-            // Format: PROVIDER|MODEL
-            configs.put(agentName, provider + "|" + modelName);
+            // Format Key: TEAM:AGENT -> Format Value: PROVIDER|MODEL
+            configs.put(teamName + ":" + agentName, provider + "|" + modelName);
             db.commit();
         }
     }
 
-    public Map<String, String> getAgentConfigs() {
+    public Map<String, String> getAgentConfigs(String teamName) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> configs = db.hashMap("agent_configs")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            Map<String, String> teamConfigs = new HashMap<>();
+            String prefix = teamName + ":";
+            configs.forEach((k, v) -> {
+                String key = (String) k;
+                if (key.startsWith(prefix)) {
+                    // Return raw agent name as key
+                    teamConfigs.put(key.substring(prefix.length()), (String) v);
+                } else if (!key.contains(":")) {
+                    // Fallback for legacy configs (global defaults) if no specific team config exists?
+                    // Or maybe we treat "default" team as the legacy holder. 
+                    // For now, let's strictly load team-specific configs to keep it clean.
+                    if ("default".equals(teamName)) {
+                         teamConfigs.put(key, (String) v);
+                    }
+                }
+            });
+            return teamConfigs;
+        }
+    }
+
+    // Legacy method for backward compatibility if needed, or just to list all
+    public Map<String, String> getAllAgentConfigs() {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)

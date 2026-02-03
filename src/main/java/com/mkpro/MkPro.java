@@ -234,6 +234,15 @@ public class MkPro {
                     }
                 }
             }
+            // Also copy adk_updater.yaml for reference
+            Path adkUpdaterTeamPath = teamsDir.resolve("adk_updater.yaml");
+            if (!Files.exists(adkUpdaterTeamPath)) {
+                try (var is = MkPro.class.getResourceAsStream("/teams/adk_updater.yaml")) {
+                    if (is != null) {
+                        Files.copy(is, adkUpdaterTeamPath);
+                    }
+                }
+            }
             return teamsDir;
         } catch (IOException e) {
             System.err.println("Error setting up teams directory: " + e.getMessage());
@@ -282,6 +291,11 @@ public class MkPro {
     }
 
     private static void runConsoleLoop(String apiKey, String summaryContext, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, InMemoryArtifactService artifactService, InMemoryMemoryService memoryService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
+        
+        // Load Team Selection first
+        java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
+        Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
+
         // Initialize default configs for all agents
         Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
         
@@ -299,9 +313,9 @@ public class MkPro {
         agentConfigs.put("GoalTracker", new AgentConfig(initialProvider, initialModelName));
         agentConfigs.put("CodeEditor", new AgentConfig(initialProvider, initialModelName));
 
-        // Load overrides from Central Memory
+        // Load overrides from Central Memory for the CURRENT TEAM
         try {
-            Map<String, String> storedConfigs = centralMemory.getAgentConfigs();
+            Map<String, String> storedConfigs = centralMemory.getAgentConfigs(currentTeam.get());
             for (Map.Entry<String, String> entry : storedConfigs.entrySet()) {
                 String agent = entry.getKey();
                 String val = entry.getValue();
@@ -333,9 +347,6 @@ public class MkPro {
         String augmentedContext = summaryContext + historyContext.toString();
 
         // Runner Building Logic
-        java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
-        Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
-
         java.util.function.Function<RunnerType, Runner> runnerFactory = (rType) -> {
             Path teamPath = teamsDir.resolve(currentTeam.get() + ".yaml");
             if (!Files.exists(teamPath)) {
@@ -456,11 +467,36 @@ public class MkPro {
                             String newTeamName = teamFiles.get(idx).getName().replaceFirst("[.][^.]+$", "");
                             currentTeam.set(newTeamName);
                             saveTeamSelection(newTeamName);
-                            fTerminal.writer().println(ANSI_BLUE + "Switched to team: " + newTeamName + ". Rebuilding runner..." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Switched to team: " + newTeamName + ". Reloading configs and rebuilding runner..." + ANSI_RESET);
                             
+                            // Reload configs for the new team
+                            try {
+                                Map<String, String> newConfigs = centralMemory.getAgentConfigs(newTeamName);
+                                // Reset to defaults first? Or keep current as baseline?
+                                // Better to reset to defaults + new overrides to avoid leakage from previous team
+                                agentConfigs.replaceAll((k, v) -> new AgentConfig(initialProvider, initialModelName));
+                                
+                                for (Map.Entry<String, String> entry : newConfigs.entrySet()) {
+                                    String agent = entry.getKey();
+                                    String val = entry.getValue();
+                                    if (val != null && val.contains("|")) {
+                                        String[] parts = val.split("\\|", 2);
+                                        try {
+                                            Provider p = Provider.valueOf(parts[0]);
+                                            String m = parts[1];
+                                            agentConfigs.put(agent, new AgentConfig(p, m));
+                                        } catch (IllegalArgumentException e) {
+                                            // Ignore invalid
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                fTerminal.writer().println(ANSI_BLUE + "Warning: Failed to load specific configs for team " + newTeamName + ANSI_RESET);
+                            }
+
                             // Rebuild runner
                             runner = runnerFactory.apply(currentRunnerType.get());
-                            fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new team definitions." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new team definitions and configs." + ANSI_RESET);
                         } else {
                             fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                         }
@@ -692,14 +728,14 @@ public class MkPro {
                     if (configureAllAgents) {
                         for (String agentName : agentConfigs.keySet()) {
                             agentConfigs.put(agentName, new AgentConfig(selectedProvider, selectedModel));
-                            centralMemory.saveAgentConfig(agentName, selectedProvider.name(), selectedModel);
+                            centralMemory.saveAgentConfig(currentTeam.get(), agentName, selectedProvider.name(), selectedModel);
                         }
                         fTerminal.writer().println(ANSI_BLUE + "Updated all agents to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         runner = runnerFactory.apply(currentRunnerType.get());
                         fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new configurations." + ANSI_RESET);
                     } else {
                         agentConfigs.put(selectedAgent, new AgentConfig(selectedProvider, selectedModel));
-                        centralMemory.saveAgentConfig(selectedAgent, selectedProvider.name(), selectedModel);
+                        centralMemory.saveAgentConfig(currentTeam.get(), selectedAgent, selectedProvider.name(), selectedModel);
                         fTerminal.writer().println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         
                         if ("Coordinator".equalsIgnoreCase(selectedAgent)) {
@@ -727,7 +763,7 @@ public class MkPro {
                             }
 
                             agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
-                            centralMemory.saveAgentConfig(agentName, newProvider.name(), newModel);
+                            centralMemory.saveAgentConfig(currentTeam.get(), agentName, newProvider.name(), newModel);
                             fTerminal.writer().println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
                             
                             if ("Coordinator".equalsIgnoreCase(agentName)) {
