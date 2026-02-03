@@ -1,6 +1,7 @@
 package com.mkpro.tools;
 
 import com.google.adk.tools.BaseTool;
+import com.google.adk.tools.GoogleSearchTool;
 import com.google.adk.tools.ToolContext;
 import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.Schema;
@@ -333,6 +334,7 @@ public class MkProTools {
                     try {
                         HttpRequest request = HttpRequest.newBuilder()
                                 .uri(URI.create(url))
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                                 .timeout(Duration.ofSeconds(20))
                                 .GET()
                                 .build();
@@ -361,6 +363,10 @@ public class MkProTools {
                 });
             }
         };
+    }
+
+    public static BaseTool createGoogleSearchTool() {
+        return new GoogleSearchTool();
     }
 
     public static BaseTool createReadImageTool() {

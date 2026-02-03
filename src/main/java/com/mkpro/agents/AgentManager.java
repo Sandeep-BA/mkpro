@@ -188,6 +188,30 @@ public class AgentManager {
         testerTools.addAll(webTools);
         docWriterTools.addAll(webTools);
 
+        // Dynamically add search/URL tools for Gemini-backed agents
+        Map<String, List<BaseTool>> toolMap = new HashMap<>();
+        toolMap.put("Coder", coderTools);
+        toolMap.put("SysAdmin", sysAdminTools);
+        toolMap.put("Tester", testerTools);
+        toolMap.put("DocWriter", docWriterTools);
+        toolMap.put("SecurityAuditor", securityAuditorTools);
+        toolMap.put("Architect", architectTools);
+        toolMap.put("DatabaseAdmin", databaseTools);
+        toolMap.put("DevOps", devOpsTools);
+        toolMap.put("DataAnalyst", dataAnalystTools);
+        toolMap.put("GoalTracker", goalTrackerTools);
+        toolMap.put("CodeEditor", codeEditorTools);
+
+        toolMap.forEach((name, tools) -> {
+            AgentConfig config = agentConfigs.get(name);
+            if (config != null && config.getProvider() == Provider.GEMINI) {
+                tools.add(MkProTools.createGoogleSearchTool());
+                // Avoid adding UrlFetchTool if already present (unlikely for most, but Tester/DocWriter have webTools)
+                // Actually webTools has SeleniumTools, not UrlFetchTool. UrlFetchTool is lightweight.
+                tools.add(MkProTools.createUrlFetchTool());
+            }
+        });
+
         // Delegation Tools
         List<BaseTool> coordinatorTools = new ArrayList<>();
         coordinatorTools.addAll(webTools); // Give Coordinator direct web access for research
@@ -215,6 +239,9 @@ public class AgentManager {
 
         // Add Coordinator-specific tools
         coordinatorTools.add(MkProTools.createUrlFetchTool());
+        if (coordConfig.getProvider() == Provider.GEMINI) {
+             coordinatorTools.add(MkProTools.createGoogleSearchTool());
+        }
         coordinatorTools.add(MkProTools.createGetActionLogsTool(logger));
         coordinatorTools.add(MkProTools.createSaveMemoryTool(centralMemory));
         coordinatorTools.add(MkProTools.createReadMemoryTool(centralMemory));

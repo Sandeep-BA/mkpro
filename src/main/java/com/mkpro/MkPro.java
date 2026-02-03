@@ -524,14 +524,14 @@ public class MkPro {
                         System.out.println(ANSI_BLUE + "No statistics available yet." + ANSI_RESET);
                     } else {
                         System.out.println(ANSI_BLUE + "Agent Statistics:" + ANSI_RESET);
-                        System.out.println(ANSI_BLUE + String.format("% -15s | % -10s | % -25s | % -8s | % -8s | % -8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + String.format("%-15s | %-10s | %-25s | %-8s | %-8s | %-8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
                         int start = Math.max(0, stats.size() - 20);
                         for (int i = start; i < stats.size(); i++) {
                             AgentStat s = stats.get(i);
                             String modelShort = s.getModel();
                             if (modelShort.length() > 25) modelShort = modelShort.substring(0, 22) + "...";
-                            System.out.println(ANSI_BRIGHT_GREEN + String.format("% -15s | % -10s | % -25s | % -8dms | % -8s | %d/%d", s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
+                            System.out.println(ANSI_BRIGHT_GREEN + String.format("%-15s | %-10s | %-25s | %-8dms | %-8s | %d/%d", s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
                         }
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "Total Invocations: " + stats.size() + ANSI_RESET);
@@ -553,7 +553,7 @@ public class MkPro {
                 Collections.sort(sortedNames);
                 for (String name : sortedNames) {
                     AgentConfig ac = agentConfigs.get(name);
-                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -40s " + ANSI_BLUE + "|%n" + ANSI_RESET, name, ac.getProvider(), ac.getModelName());
+                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-40s " + ANSI_BLUE + "|%n" + ANSI_RESET, name, ac.getProvider(), ac.getModelName());
                 }
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 
