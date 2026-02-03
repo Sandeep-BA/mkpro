@@ -56,6 +56,7 @@ public class AgentManager {
     private final InMemoryArtifactService artifactService;
     private final InMemoryMemoryService memoryService;
     private final String apiKey;
+    private final String ollamaServerUrl;
     private final ActionLogger logger;
     private final CentralMemory centralMemory;
     private final RunnerType runnerType;
@@ -91,6 +92,7 @@ public class AgentManager {
                         InMemoryArtifactService artifactService, 
                         InMemoryMemoryService memoryService, 
                         String apiKey,
+                        String ollamaServerUrl,
                         ActionLogger logger,
                         CentralMemory centralMemory,
                         RunnerType runnerType,
@@ -99,6 +101,7 @@ public class AgentManager {
         this.artifactService = artifactService;
         this.memoryService = memoryService;
         this.apiKey = apiKey;
+        this.ollamaServerUrl = ollamaServerUrl;
         this.logger = logger;
         this.centralMemory = centralMemory;
         this.runnerType = runnerType;
@@ -335,7 +338,7 @@ public class AgentManager {
         } else if (config.getProvider() == Provider.BEDROCK) {
             return new BedrockBaseLM(config.getModelName(), null);
         } else {
-            return new OllamaBaseLM(config.getModelName(), "http://localhost:11434");
+            return new OllamaBaseLM(config.getModelName(), ollamaServerUrl);
         }
     }
 

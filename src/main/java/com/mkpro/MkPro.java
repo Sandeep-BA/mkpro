@@ -233,7 +233,8 @@ public class MkPro {
             
             // Default builder for UI
             java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> uiRunnerBuilder = (agentConfigs, rType) -> {
-                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamsDir.resolve("default.yaml"));
+                String ollamaUrl = centralMemory.getSelectedOllamaServer();
+                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamsDir.resolve("default.yaml"));
                 return am.createRunner(agentConfigs, finalSummaryContext);
             };
 
@@ -395,7 +396,8 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "Team file not found: " + teamPath + ". Falling back to default.yaml" + ANSI_RESET);
                 teamPath = teamsDir.resolve("default.yaml");
             }
-            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamPath);
+            String ollamaUrl = centralMemory.getSelectedOllamaServer();
+            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamPath);
             return am.createRunner(agentConfigs, augmentedContext);
         };
 
@@ -517,6 +519,7 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /runner     - Change the execution runner." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /team       - Switch agent team definition." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /server     - Manage Ollama servers." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /models     - List available models." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change Coordinator model." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /status     - Show current configuration." + ANSI_RESET);
@@ -673,6 +676,7 @@ public class MkPro {
             if ("/status".equalsIgnoreCase(line)) {
                 System.out.println(ANSI_BLUE + "Runner Type : " + ANSI_BRIGHT_GREEN + currentRunnerType.get() + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "Team Config : " + ANSI_BRIGHT_GREEN + currentTeam.get() + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "Ollama Server: " + ANSI_BRIGHT_GREEN + centralMemory.getSelectedOllamaServer() + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "| Agent        | Provider   | Model                                    |" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
@@ -695,6 +699,66 @@ public class MkPro {
                     System.out.println(ANSI_BRIGHT_GREEN + "  Stored Projects  : " + memories.size() + ANSI_RESET);
                 } catch (Exception e) {
                     System.out.println(ANSI_BRIGHT_GREEN + "  Central Store    : [Error accessing DB] " + e.getMessage() + ANSI_RESET);
+                }
+                continue;
+            }
+
+            if (line.toLowerCase().startsWith("/server")) {
+                String[] parts = line.trim().split("\\s+");
+                List<String> servers = centralMemory.getOllamaServers();
+                String selected = centralMemory.getSelectedOllamaServer();
+
+                if (parts.length == 1) {
+                    fTerminal.writer().println(ANSI_BLUE + "Ollama Servers:" + ANSI_RESET);
+                    for (int i = 0; i < servers.size(); i++) {
+                        String s = servers.get(i);
+                        String marker = s.equals(selected) ? " *" : "";
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%s%n" + ANSI_RESET, i + 1, s, marker);
+                    }
+                    fTerminal.writer().println(ANSI_BLUE + "Usage: /server add <url>, /server select <index>, /server remove <index>" + ANSI_RESET);
+                } else if (parts.length >= 2) {
+                    String sub = parts[1];
+                    if ("add".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        String url = parts[2];
+                        if (!servers.contains(url)) {
+                            servers.add(url);
+                            centralMemory.saveOllamaServers(servers);
+                            fTerminal.writer().println(ANSI_BLUE + "Added server: " + url + ANSI_RESET);
+                        } else {
+                            fTerminal.writer().println(ANSI_BLUE + "Server already exists." + ANSI_RESET);
+                        }
+                    } else if ("select".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < servers.size()) {
+                                centralMemory.saveSelectedOllamaServer(servers.get(idx));
+                                fTerminal.writer().println(ANSI_BLUE + "Selected server: " + servers.get(idx) + ANSI_RESET);
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index format." + ANSI_RESET);
+                        }
+                    } else if ("remove".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < servers.size()) {
+                                String removed = servers.remove(idx);
+                                centralMemory.saveOllamaServers(servers);
+                                fTerminal.writer().println(ANSI_BLUE + "Removed server: " + removed + ANSI_RESET);
+                                if (removed.equals(selected) && !servers.isEmpty()) {
+                                    centralMemory.saveSelectedOllamaServer(servers.get(0));
+                                    fTerminal.writer().println(ANSI_BLUE + "Selected default: " + servers.get(0) + ANSI_RESET);
+                                }
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index format." + ANSI_RESET);
+                        }
+                    } else {
+                        fTerminal.writer().println(ANSI_BLUE + "Unknown subcommand. Usage: /server add <url>, /server select <index>, /server remove <index>" + ANSI_RESET);
+                    }
                 }
                 continue;
             }
@@ -769,9 +833,13 @@ public class MkPro {
                     } else if (selectedProvider == Provider.OLLAMA) {
                         fTerminal.writer().println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
                         try {
+                            String baseUrl = centralMemory.getSelectedOllamaServer();
+                            // Ensure no trailing slash for clean concatenation, though URI.create handles some
+                            if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                            
                             HttpClient client = HttpClient.newHttpClient();
                             HttpRequest request = HttpRequest.newBuilder()
-                                    .uri(URI.create("http://localhost:11434/api/tags"))
+                                    .uri(URI.create(baseUrl + "/api/tags"))
                                     .timeout(Duration.ofSeconds(5))
                                     .GET()
                                     .build();

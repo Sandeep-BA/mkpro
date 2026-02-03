@@ -145,7 +145,58 @@ public class CentralMemory {
         }
     }
 
-    // --- Goal Tracking ---
+    // --- Ollama Configuration ---
+
+    public void saveOllamaServers(List<String> servers) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            // Store as comma-separated string
+            config.put("servers", String.join(",", servers));
+            db.commit();
+        }
+    }
+
+    public List<String> getOllamaServers() {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            String servers = config.get("servers");
+            if (servers == null || servers.isEmpty()) {
+                // Default
+                List<String> defaults = new ArrayList<>();
+                defaults.add("http://localhost:11434");
+                return defaults;
+            }
+            return new ArrayList<>(List.of(servers.split(",")));
+        }
+    }
+
+    public void saveSelectedOllamaServer(String url) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            config.put("selected_server", url);
+            db.commit();
+        }
+    }
+
+    public String getSelectedOllamaServer() {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            String selected = config.get("selected_server");
+            return selected != null ? selected : "http://localhost:11434";
+        }
+    }
 
     public void addGoal(String projectPath, com.mkpro.models.Goal goal) {
         try (DB db = openDB()) {
