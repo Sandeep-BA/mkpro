@@ -35,6 +35,13 @@ import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
 import java.io.File;
 
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.MapDBVectorStore;
+import com.google.adk.memory.MemoryEntry;
+import com.google.adk.memory.Vector;
+import com.google.adk.memory.VectorStore;
+ 
+
 public class MkProTools {
 
     public static final String ANSI_RESET = "\u001b[0m";
@@ -42,6 +49,65 @@ public class MkProTools {
     public static final String ANSI_YELLOW = "\u001b[33m";
     public static final String ANSI_RED = "\u001b[31m";
     public static final String ANSI_GREEN = "\u001b[32m";
+
+    public static BaseTool createSearchCodebaseTool(MapDBVectorStore vectorStore, EmbeddingService embeddingService) {
+        return new BaseTool(
+                "search_codebase",
+                "Semantically searches the codebase using vector embeddings. Use this to find relevant code snippets based on meaning."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "query", Schema.builder()
+                                                .type("STRING")
+                                                .description("The search query describing what code you are looking for.")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("query"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String query = (String) args.get("query");
+                System.out.println(ANSI_BLUE + "[VectorSearch] Searching for: " + query + ANSI_RESET);
+                
+                return embeddingService.generateEmbedding(query)
+                    .map(embedding -> {
+                        // Ensure embedding is float[] if ADK expects it, or double[]. 
+                        // Checking ADK docs/source previously: generateEmbedding returns Single<double[]>.n                        // VectorStore.searchVectors likely takes double[].
+                        
+                        List<Vector> results = vectorStore.searchTopNVectors( embedding, 0.6, 5); // Top 5, threshold 0.6
+                        
+                        if (results.isEmpty()) {
+                            return Collections.singletonMap("result", "No relevant code found for query: " + query);
+                        }
+                        
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Found ").append(results.size()).append(" relevant snippets:\n\n");
+                        
+                        for (int i = 0; i < results.size(); i++) {
+                            Vector res = results.get(i);
+                         
+                            // Assuming MemoryEntry content format "FilePath: ... \n Content" or just Content.
+                            // We can format it nicely.
+                            //sb.append("--- Match ").append(i + 1).append(" (Score: ").append(String.format("%.2f", res.)).append(") ---\n");
+                            sb.append(res.getContent()); 
+                            sb.append("\n\n");
+                        }
+                        
+                        return Collections.<String, Object>singletonMap("result", sb.toString());
+                    });
+                  //  .onErrorReturn(e -> Collections.singletonMap("error", "Vector search failed: " + e.getMessage()));
+            }
+        };
+    }
 
     public static BaseTool createReadClipboardTool() {
         return new BaseTool(

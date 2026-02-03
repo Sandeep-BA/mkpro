@@ -33,22 +33,27 @@ import com.mkpro.tools.MkProTools;
 import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.VectorStore;
+
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.Files;
 import java.time.LocalDate;
-import java.util.Collections;
+import java.io.InputStream;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Collections;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.google.adk.memory.MapDBVectorStore;
 import com.mkpro.models.AgentDefinition;
 import com.mkpro.models.AgentsConfig;
-import java.nio.file.Path;
-import java.nio.file.Files;
-import java.io.InputStream;
-import java.util.HashMap;
+// ... (rest of imports)
 
 public class AgentManager {
 
@@ -61,6 +66,8 @@ public class AgentManager {
     private final CentralMemory centralMemory;
     private final RunnerType runnerType;
     private final Map<String, AgentDefinition> agentDefinitions;
+    private final MapDBVectorStore vectorStore;
+    private final EmbeddingService embeddingService;
 
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BLUE = "\u001b[34m";
@@ -96,7 +103,9 @@ public class AgentManager {
                         ActionLogger logger,
                         CentralMemory centralMemory,
                         RunnerType runnerType,
-                        Path teamFilePath) {
+                        Path teamFilePath,
+                        MapDBVectorStore vectorStore,
+                        EmbeddingService embeddingService) {
         this.sessionService = sessionService;
         this.artifactService = artifactService;
         this.memoryService = memoryService;
@@ -106,6 +115,8 @@ public class AgentManager {
         this.centralMemory = centralMemory;
         this.runnerType = runnerType;
         this.agentDefinitions = loadAgentDefinitions(teamFilePath);
+        this.vectorStore = vectorStore;
+        this.embeddingService = embeddingService;
     }
 
     private Map<String, AgentDefinition> loadAgentDefinitions(Path teamFilePath) {
@@ -142,6 +153,9 @@ public class AgentManager {
         coderTools.add(MkProTools.createListDirTool());
         coderTools.add(MkProTools.createReadImageTool());
         coderTools.add(MkProTools.createReadClipboardTool());
+        if (vectorStore != null && embeddingService != null) {
+            coderTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+        }
 
         List<BaseTool> sysAdminTools = new ArrayList<>();
         sysAdminTools.add(MkProTools.createRunShellTool());
@@ -163,6 +177,9 @@ public class AgentManager {
         architectTools.add(MkProTools.createReadFileTool());
         architectTools.add(MkProTools.createListDirTool());
         architectTools.add(MkProTools.createReadImageTool());
+        if (vectorStore != null && embeddingService != null) {
+            architectTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+        }
 
         List<BaseTool> databaseTools = new ArrayList<>();
         databaseTools.addAll(coderTools); // Read/Write SQL files, schemas
@@ -264,6 +281,9 @@ public class AgentManager {
         }
 
         // Add Coordinator-specific tools
+        if (vectorStore != null && embeddingService != null) {
+            coordinatorTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+        }
         coordinatorTools.add(MkProTools.createUrlFetchTool());
         if (coordConfig.getProvider() == Provider.GEMINI) {
              coordinatorTools.add(MkProTools.createGoogleSearchTool());

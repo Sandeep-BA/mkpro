@@ -12,6 +12,11 @@ import com.google.adk.memory.InMemoryMemoryService;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 
+import com.google.adk.memory.Vector;
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.VectorStore;
+import com.google.adk.memory.MemoryEntry;
+
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.AgentStat;
 import com.mkpro.models.Provider;
@@ -60,6 +65,7 @@ import io.reactivex.rxjava3.disposables.Disposable;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import com.google.adk.memory.MapDBVectorStore;
 
 public class MkPro {
 
@@ -234,7 +240,7 @@ public class MkPro {
             // Default builder for UI
             java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> uiRunnerBuilder = (agentConfigs, rType) -> {
                 String ollamaUrl = centralMemory.getSelectedOllamaServer();
-                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamsDir.resolve("default.yaml"));
+                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamsDir.resolve("default.yaml"), null, null);
                 return am.createRunner(agentConfigs, finalSummaryContext);
             };
 
@@ -377,6 +383,10 @@ public class MkPro {
             System.err.println(ANSI_BLUE + "Warning: Failed to load agent configs from central memory: " + e.getMessage() + ANSI_RESET);
         }
 
+        // Vector Store Init
+        EmbeddingService embeddingService = IndexingHelper.createEmbeddingService();
+        MapDBVectorStore vectorStore = IndexingHelper.createVectorStore();
+
         // Inject recent history from ActionLogger
         List<String> recentLogs = logger.getRecentLogs(10);
         StringBuilder historyContext = new StringBuilder();
@@ -386,6 +396,7 @@ public class MkPro {
                 historyContext.append(log).append("\n");
             }
         }
+              
         
         String augmentedContext = summaryContext + historyContext.toString();
 
@@ -397,7 +408,7 @@ public class MkPro {
                 teamPath = teamsDir.resolve("default.yaml");
             }
             String ollamaUrl = centralMemory.getSelectedOllamaServer();
-            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamPath);
+            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamPath, vectorStore, embeddingService);
             return am.createRunner(agentConfigs, augmentedContext);
         };
 
@@ -936,6 +947,11 @@ public class MkPro {
                 } else {
                      fTerminal.writer().println(ANSI_BLUE + "Usage: /config (interactive) OR /config <Agent> <Provider> [Model]" + ANSI_RESET);
                 }
+                continue;
+            }
+
+            if ("/index".equalsIgnoreCase(line)) {
+                IndexingHelper.indexCodebase(vectorStore, embeddingService);
                 continue;
             }
 
