@@ -25,6 +25,8 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 
 - **Goal Tracking**: Never lose track of original user requests during complex, multi-step sessions.
 - **Granular Configuration**: Assign different models to different agents. Use a cheap, fast model (e.g., `gemini-1.5-flash`) for the *Coder* and a reasoning-heavy model (e.g., `claude-3-5-sonnet`) for the *Architect*.
+- **Per-Team Configurations**: Save different model setups for different teams (e.g., a "Security" team using specialized models vs. a "Dev" team using fast models).
+- **Clipboard Integration**: Paste text or images directly into the terminal using `Ctrl+V`. Images are automatically saved and provided to agents.
 - **Persistent Memory**:
     - **Central Store**: Project summaries and agent configurations are saved to `~/.mkpro/central_memory.db`.
     - **Local Session**: Context is managed efficiently with `/compact` to save tokens.
@@ -103,6 +105,11 @@ This generates the native Windows executable `target/mkpro.exe` and a fat JAR.
 ### Switching Teams:
 Use the `/team` command in the console to list and select available team rosters. This will automatically rebuild the agent runner with the new instructions and roles.
 
+### Per-Team Model Configurations
+Model assignments (e.g., Coder uses Gemini 1.5 Pro) are now saved **per team**.
+- When you switch teams via `/team`, the assistant automatically reloads the specific model configuration you last set for that team.
+- This allows you to have a "Low Cost" team using Flash models and a "High Performance" team using Pro/Opus models, and switch between them instantly.
+
 ## 🌍 Installation & System-Wide Setup
 
 To use `mkpro` from any directory in your terminal, follow these steps:
@@ -137,6 +144,15 @@ Select Agent to configure:
   [2] Coder (Current: GEMINI - gemini-1.5-pro)
   ...
 ```
+
+### Clipboard & Images
+`mkpro` supports seamless clipboard integration for a smoother workflow.
+- **Paste Text**: Press `Ctrl+V` to paste text from your clipboard directly into the prompt.
+- **Paste Images**: If you have an image in your clipboard (e.g., a screenshot), pressing `Ctrl+V` will:
+    1.  Automatically save the image to a temporary file.
+    2.  Insert the file path into your prompt.
+    3.  Notify the agent that an image is available for analysis.
+    This is perfect for showing the **Coder** or **Tester** UI bugs, diagrams, or error screenshots.
 
 ### Real-World Use Cases
 
@@ -176,7 +192,7 @@ Select Agent to configure:
 | `/stats` | **Performance**. Show agent usage statistics (latencies, token length, models). |
 | `/runner` | **Switch Runner**. Choose between InMemory, MapDB, or Postgres. |
 | `/team` | **Switch Team**. Select a different agent roster from `~/.mkpro/teams/`. |
-| `/config` | **Configure Team**. Interactive menu to set agent models/providers. Settings are saved. |
+| `/config` | **Configure Team**. Interactive menu to set agent models/providers. Settings are saved per-team. |
 | `/init` | **Learn Project**. Agents scan and memorize the project structure. |
 | `/re-init` | **Refresh Memory**. Re-scan the project if structure changed significantly. |
 | `/summarize` | Generate and save a session summary to `session_summary.txt`. |
