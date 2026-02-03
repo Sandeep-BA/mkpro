@@ -95,6 +95,39 @@ public class MkPro {
         "amazon.titan-text-express-v1"
     );
 
+    // Reusable Clipboard Handler
+    private static String handleClipboardPaste(Terminal term) {
+        try {
+            if (java.awt.GraphicsEnvironment.isHeadless()) return null;
+
+            Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
+            if (c == null) return null;
+
+            if (c.isDataFlavorAvailable(DataFlavor.imageFlavor)) {
+                BufferedImage img = (BufferedImage) c.getData(DataFlavor.imageFlavor);
+                String tempDir = System.getProperty("java.io.tmpdir");
+                String fileName = "pasted_image_" + System.currentTimeMillis() + ".png";
+                File outputFile = new File(tempDir, fileName);
+                ImageIO.write(img, "png", outputFile);
+                
+                String pathStr = outputFile.getAbsolutePath();
+                String result = "\"" + pathStr + "\" ";
+                
+                // Notify user visibly using terminal writer with explicit CRLF
+                term.writer().print("\r\n" + ANSI_BLUE + "[System] Image pasted and saved to: " + pathStr + ANSI_RESET + "\r\n");
+                term.writer().print(ANSI_BLUE + "[System] Image path added to buffer." + ANSI_RESET + "\r\n");
+                term.flush();
+                
+                return result;
+            } else if (c.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                return (String) c.getData(DataFlavor.stringFlavor);
+            }
+        } catch (Exception e) {
+            // Fail silently
+        }
+        return null;
+    }
+
     public static void main(String[] args) {
         // Check for flags
         boolean useUI = false;
@@ -454,10 +487,10 @@ public class MkPro {
         final Terminal fTerminal = terminal;
         final LineReader fLineReader = lineReader;
 
-        if (verbose) {
-            System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
-        }
+        if (verbose) System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
         System.out.println(ANSI_BLUE + "Type '/help' for a list of commands. Press [ESC] to interrupt agent." + ANSI_RESET);
+
+        StringBuilder pendingInputBuffer = new StringBuilder();
 
         while (true) {
             String line = null;
@@ -943,44 +976,52 @@ public class MkPro {
                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE);
                                                                     fTerminal.writer().flush();
                                                                     
-                                                                    // Spinner chars
-                                                                    String[] syms = {"|", "/", "-", "\\"};
-                                                                    int spinnerIdx = 0;
-                                                                    long lastSpinnerUpdate = 0;
-                                                    
-                                                                    while (isThinking.get()) {
-                                                                        // Non-blocking read with timeout
-                                                                        int c = fTerminal.reader().read(10); 
-                                                                        if (c == 27) { // ESC
-                                                                            isCancelled.set(true);
-                                                                            agentSubscription.dispose();
-                                                                            isThinking.set(false);
-                                                                            fTerminal.writer().print(ANSI_RESET);
-                                                                            fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
-                                                                            fTerminal.writer().flush();
-                                                                            logger.log("SYSTEM", "User interrupted the agent.");
-                                                                            break;
-                                                                        }
-                                                                        
-                                                                        // Update spinner only if no response has started streaming yet
-                                                                        if (responseBuilder.length() == 0) {
-                                                                            long now = System.currentTimeMillis();
-                                                                            if (now - lastSpinnerUpdate > 100) {
-                                                                                fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
-                                                                                fTerminal.writer().flush();
-                                                                                lastSpinnerUpdate = now;
-                                                                            }
-                                                                        } else {
-                                                                            // Once response starts, ensure we cleared the spinner line once
-                                                                            if (spinnerIdx != -1) {
-                                                                                 fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
-                                                                                 fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
-                                                                                 fTerminal.writer().flush();
-                                                                                 spinnerIdx = -1; // Flag that we are done spinning
-                                                                            }
-                                                                        }
-                                                                    }
-                        
+                                                                                                        // Spinner chars
+                                                                                                        String[] syms = {"|", "/", "-", "\\"};
+                                                                                                        int spinnerIdx = 0;
+                                                                                                        long lastSpinnerUpdate = 0;
+                                                                                        
+                                                                                                        while (isThinking.get()) {
+                                                                                                            // Poll for input with timeout to listen for user actions while agent works
+                                                                                                            int c = fTerminal.reader().read(10); 
+                                                                                                            
+                                                                                                            if (c == 27) { // ESC -> Cancel
+                                                                                                                isCancelled.set(true);
+                                                                                                                if (agentSubscription != null) agentSubscription.dispose();
+                                                                                                                isThinking.set(false);
+                                                                                                                fTerminal.writer().print(ANSI_RESET);
+                                                                                                                fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
+                                                                                                                fTerminal.writer().flush();
+                                                                                                                logger.log("SYSTEM", "User interrupted the agent.");
+                                                                                                                break;
+                                                                                                            } else if (c == 22) { // Ctrl+V -> Paste in background
+                                                                                                                String pasted = handleClipboardPaste(fTerminal);
+                                                                                                                if (pasted != null) {
+                                                                                                                    pendingInputBuffer.append(pasted);
+                                                                                                                }
+                                                                                                            } else if (c > 0) {
+                                                                                                                // Buffer type-ahead characters
+                                                                                                                pendingInputBuffer.append((char)c);
+                                                                                                            }
+                                                                                                            
+                                                                                                            // Update spinner only if no response has started streaming yet
+                                                                                                            if (responseBuilder.length() == 0) {
+                                                                                                                long now = System.currentTimeMillis();
+                                                                                                                if (now - lastSpinnerUpdate > 100) {
+                                                                                                                    fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
+                                                                                                                    fTerminal.writer().flush();
+                                                                                                                    lastSpinnerUpdate = now;
+                                                                                                                }
+                                                                                                            } else {
+                                                                                                                // Once response starts, ensure we cleared the spinner line once
+                                                                                                                if (spinnerIdx != -1) {
+                                                                                                                     fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
+                                                                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
+                                                                                                                     fTerminal.writer().flush();
+                                                                                                                     spinnerIdx = -1; // Flag that we are done spinning
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }                        
                                     } catch (Exception e) {
                                         System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
                                     }        }
