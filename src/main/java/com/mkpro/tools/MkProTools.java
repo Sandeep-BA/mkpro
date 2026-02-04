@@ -39,8 +39,8 @@ import com.google.adk.memory.EmbeddingService;
 import com.google.adk.memory.MapDBVectorStore;
 import com.google.adk.memory.MemoryEntry;
 import com.google.adk.memory.Vector;
-import com.google.adk.memory.VectorStore;
- 
+import com.google.adk.memory.VectorStore.SearchResult;
+import com.mkpro.IndexingHelper;
 
 public class MkProTools {
 
@@ -83,7 +83,7 @@ public class MkProTools {
                         // Ensure embedding is float[] if ADK expects it, or double[]. 
                         // Checking ADK docs/source previously: generateEmbedding returns Single<double[]>.n                        // VectorStore.searchVectors likely takes double[].
                         
-                        List<Vector> results = vectorStore.searchTopNVectors( embedding, 0.6, 5); // Top 5, threshold 0.6
+                        List<Vector> results = vectorStore.searchTopNVectors( embedding, 0.0, 5); // Top 5, threshold 0.6
                         
                         if (results.isEmpty()) {
                             return Collections.singletonMap("result", "No relevant code found for query: " + query);
@@ -575,6 +575,55 @@ public class MkProTools {
                     } catch (Exception e) {
                         return Collections.singletonMap("error", "Search failed: " + e.getMessage());
                     }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createMultiProjectSearchTool(EmbeddingService embeddingService) {
+        return new BaseTool(
+                "search_multi_project",
+                "Semantically searches across multiple project vector stores. Use this to find code or information from other indexed projects."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "query", Schema.builder()
+                                                .type("STRING")
+                                                .description("The search query.")
+                                                .build(),
+                                        "projects", Schema.builder()
+                                                .type("ARRAY")
+                                                .items(Schema.builder().type("STRING").build())
+                                                .description("Optional list of project names (folder names) to search. If omitted, searches all.")
+                                                .build(),
+                                        "limit", Schema.builder()
+                                                .type("INTEGER")
+                                                .description("Max results per project (default 5).")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("query"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String query = (String) args.get("query");
+                List<String> projects = (List<String>) args.get("projects");
+                Double limitD = (Double) args.get("limit"); // JSON numbers often come as Double
+                int limit = limitD != null ? limitD.intValue() : 5;
+
+                System.out.println(ANSI_BLUE + "[MultiVectorSearch] Searching for: " + query + ANSI_RESET);
+                
+                return Single.fromCallable(() -> {
+                    String result = IndexingHelper.searchMultipleProjects(query, projects, embeddingService, limit);
+                    return Collections.singletonMap("result", result);
                 });
             }
         };
