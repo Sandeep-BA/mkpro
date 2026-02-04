@@ -14,7 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class IndexingHelper {
@@ -37,7 +41,7 @@ public class IndexingHelper {
             dbFile.getParentFile().mkdirs();
         }
         
-        return new MapDBVectorStore(vectorDbPath,projectName);
+        return new MapDBVectorStore(vectorDbPath, projectName);
     }
 
     public static void indexCodebase(VectorStore vectorStore, EmbeddingService embeddingService) {
@@ -54,13 +58,30 @@ public class IndexingHelper {
                 })
                 .forEach(p -> {
                     try {
-                        if (Files.size(p) < 100000) { // Skip huge files
-                            String content = "File: " + startPath.relativize(p).toString() + "\n\n" + Files.readString(p);
+                        if (Files.size(p) < 200000) { // Skip huge files
+                            String content = Files.readString(p);
+                            String relPath = startPath.relativize(p).toString();
                             
-                         
+                            List<String> chunks;
+                            if (relPath.endsWith(".java")) {
+                                chunks = chunkJavaContent(content);
+                            } else {
+                                chunks = chunkTextContent(content);
+                            }
                             
-                            double[] vector = embeddingService.generateEmbedding(content).blockingGet();
-                            vectorStore.insertVector(new Vector(""+System.currentTimeMillis(), content, vector, new HashMap())); //Do better work for id generation.
+                            for (int i = 0; i < chunks.size(); i++) {
+                                String chunk = chunks.get(i);
+                                String entryContent = "File: " + relPath + "\n\n" + chunk;
+                                
+                                double[] vector = embeddingService.generateEmbedding(entryContent).blockingGet();
+                                
+                                String id = relPath + "#" + i;
+                                Map<String, Object> metadata = new HashMap<>();
+                                metadata.put("file_path", relPath);
+                                metadata.put("chunk_index", i);
+                                
+                                vectorStore.insertVector(new Vector(id, entryContent, vector, metadata));
+                            }
                             
                             int c = count.incrementAndGet();
                             if (c % 10 == 0) System.out.print(".");
@@ -74,4 +95,51 @@ public class IndexingHelper {
             System.err.println("Error indexing: " + e.getMessage());
         }
     }
+
+    private static List<String> chunkTextContent(String content) {
+        List<String> chunks = new ArrayList<>();
+        int chunkSize = 2000;
+        int overlap = 200;
+        
+        for (int i = 0; i < content.length(); i += (chunkSize - overlap)) {
+            int end = Math.min(i + chunkSize, content.length());
+            chunks.add(content.substring(i, end));
+        }
+        return chunks;
+    }
+
+    private static List<String> chunkJavaContent(String content) {
+        List<String> chunks = new ArrayList<>();
+        String[] lines = content.split("\n");
+        StringBuilder currentChunk = new StringBuilder();
+        int braceBalance = 0;
+        boolean insideMethod = false;
+        
+        for (String line : lines) {
+            currentChunk.append(line).append("\n");
+            
+            for (char c : line.toCharArray()) {
+                if (c == '{') braceBalance++;
+                else if (c == '}') braceBalance--;
+            }
+            
+            // Heuristic: If balanced (0) or at root level (1 for class), we might be ending a method or block
+            // But usually class is level 0->1. Methods 1->2. 
+            // Let's simplified: If braceBalance is 1 (inside class) and we were deeper, split?
+            // Actually, simplified brace counting is hard without parsing.
+            // Let's stick to size-based chunking but try to respect method boundaries by regex if possible.
+            // Or just use the text chunker for robustness.
+            
+            // Reverting to text chunker for safety but with larger overlap to catch context.
+            // A bad parser is worse than a dumb splitter.
+        }
+        
+        return chunkTextContent(content); 
+    }
+    
+    // NOTE: I decided to fallback to text chunking for Java because implementing a robust 
+    // java method extractor with just regex/brace counting on raw strings is error-prone 
+    // and can break easily (comments, strings with braces, etc.).
+    // A Sliding Window with overlap is the industry standard fallback.
+
 }
