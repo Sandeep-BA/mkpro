@@ -153,6 +153,7 @@ public class AgentManager {
         coderTools.add(MkProTools.createListDirTool());
         coderTools.add(MkProTools.createReadImageTool());
         coderTools.add(MkProTools.createReadClipboardTool());
+        coderTools.add(MkProTools.createImageCropTool());
         if (vectorStore != null && embeddingService != null) {
             coderTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
         }
