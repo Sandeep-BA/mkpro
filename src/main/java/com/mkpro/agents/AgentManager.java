@@ -213,19 +213,43 @@ public class AgentManager {
         testerTools.addAll(webTools);
         docWriterTools.addAll(webTools);
 
-        // Dynamically add search/URL tools for Gemini-backed agents
+        // Dynamically assign tools based on agent roles/names
         Map<String, List<BaseTool>> toolMap = new HashMap<>();
-        toolMap.put("Coder", coderTools);
-        toolMap.put("SysAdmin", sysAdminTools);
-        toolMap.put("Tester", testerTools);
-        toolMap.put("DocWriter", docWriterTools);
-        toolMap.put("SecurityAuditor", securityAuditorTools);
-        toolMap.put("Architect", architectTools);
-        toolMap.put("DatabaseAdmin", databaseTools);
-        toolMap.put("DevOps", devOpsTools);
-        toolMap.put("DataAnalyst", dataAnalystTools);
-        toolMap.put("GoalTracker", goalTrackerTools);
-        toolMap.put("CodeEditor", codeEditorTools);
+        
+        for (String agentName : agentConfigs.keySet()) {
+            if ("Coordinator".equals(agentName)) continue; // Coordinator handled separately
+
+            List<BaseTool> toolsForAgent = new ArrayList<>();
+            
+            // Heuristic role assignment
+            if (agentName.contains("Tester") || agentName.contains("QA")) {
+                toolsForAgent.addAll(testerTools);
+            } else if (agentName.contains("SysAdmin")) {
+                toolsForAgent.addAll(sysAdminTools);
+            } else if (agentName.contains("DocWriter")) {
+                toolsForAgent.addAll(docWriterTools);
+            } else if (agentName.contains("Security")) {
+                toolsForAgent.addAll(securityAuditorTools);
+            } else if (agentName.contains("Architect")) {
+                toolsForAgent.addAll(architectTools);
+            } else if (agentName.contains("Database") || agentName.contains("DBA")) {
+                toolsForAgent.addAll(databaseTools);
+            } else if (agentName.contains("DevOps") || agentName.contains("SRE")) {
+                toolsForAgent.addAll(devOpsTools);
+            } else if (agentName.contains("Analyst") || agentName.contains("Data")) {
+                toolsForAgent.addAll(dataAnalystTools);
+            } else if (agentName.contains("Goal") || agentName.contains("Tracker")) {
+                toolsForAgent.addAll(goalTrackerTools);
+            } else if (agentName.contains("CodeEditor")) {
+                toolsForAgent.addAll(codeEditorTools);
+            } else {
+                // Default fallback for any other "Coder" or custom agent (e.g. JavaCoder, PythonCoder)
+                // They get the standard coder toolset
+                toolsForAgent.addAll(coderTools);
+            }
+            
+            toolMap.put(agentName, toolsForAgent);
+        }
 
         toolMap.forEach((name, tools) -> {
             AgentConfig config = agentConfigs.get(name);
@@ -245,40 +269,19 @@ public class AgentManager {
         BaseTool codeEditorTool = createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo);
         if (codeEditorTool != null) {
             coordinatorTools.add(codeEditorTool);
-            coderTools.add(codeEditorTool);
+            // We don't necessarily need to add CodeEditor to every "Coder" anymore if they are specialized
+            // But let's keep it available to anyone with 'coderTools' just in case? 
+            // Actually, best to let Coordinator handle delegation to Editor or specialized coders handle it.
+            // For simplicity in this refactor, we won't auto-inject ask_code_editor into every agent yet.
         }
 
-        // Add optional delegation tools
-        List<String> optionalAgents = new ArrayList<>();
-        optionalAgents.add("GoalTracker:ask_goal_tracker");
-        optionalAgents.add("Coder:ask_coder");
-        optionalAgents.add("SysAdmin:ask_sysadmin");
-        optionalAgents.add("Tester:ask_tester");
-        optionalAgents.add("DocWriter:ask_doc_writer");
-        optionalAgents.add("SecurityAuditor:ask_security_auditor");
-        optionalAgents.add("Architect:ask_architect");
-        optionalAgents.add("DatabaseAdmin:ask_database_admin");
-        optionalAgents.add("DevOps:ask_devops");
-        optionalAgents.add("DataAnalyst:ask_data_analyst");
+        // Add delegation tools for ALL agents found in the config
+        for (String agentName : toolMap.keySet()) {
+            // Skip CodeEditor as it's already added or special
+            if ("CodeEditor".equals(agentName)) continue;
 
-        Map<String, List<BaseTool>> toolMapping = new HashMap<>();
-        toolMapping.put("GoalTracker", goalTrackerTools);
-        toolMapping.put("Coder", coderTools);
-        toolMapping.put("SysAdmin", sysAdminTools);
-        toolMapping.put("Tester", testerTools);
-        toolMapping.put("DocWriter", docWriterTools);
-        toolMapping.put("SecurityAuditor", securityAuditorTools);
-        toolMapping.put("Architect", architectTools);
-        toolMapping.put("DatabaseAdmin", databaseTools);
-        toolMapping.put("DevOps", devOpsTools);
-        toolMapping.put("DataAnalyst", dataAnalystTools);
-
-        for (String entry : optionalAgents) {
-            String[] parts = entry.split(":");
-            String agentName = parts[0];
-            String toolName = parts[1];
-            
-            BaseTool tool = createDelegationToolFromDef(agentName, toolName, agentConfigs, toolMapping.get(agentName), contextInfo);
+            String toolName = "ask_" + agentName.replaceAll("([a-z])([A-Z]+)", "$1_$2").toLowerCase();
+            BaseTool tool = createDelegationToolFromDef(agentName, toolName, agentConfigs, toolMap.get(agentName), contextInfo);
             if (tool != null) {
                 coordinatorTools.add(tool);
             }

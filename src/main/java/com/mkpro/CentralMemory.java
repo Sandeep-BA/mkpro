@@ -76,40 +76,62 @@ public class CentralMemory {
         }
     }
 
-    public void saveAgentConfig(String teamName, String agentName, String provider, String modelName) {
+    public void saveAgentConfig(String projectPath, String teamName, String agentName, String provider, String modelName) {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)
                     .valueSerializer(Serializer.STRING)
                     .createOrOpen();
-            // Format Key: TEAM:AGENT -> Format Value: PROVIDER|MODEL
-            configs.put(teamName + ":" + agentName, provider + "|" + modelName);
+            // Format Key: PROJECT:TEAM:AGENT -> Format Value: PROVIDER|MODEL
+            // We hash the project path to keep keys reasonably short/safe, or just use it directly. 
+            // Using direct string is simpler for debug.
+            String key = projectPath + ":" + teamName + ":" + agentName;
+            configs.put(key, provider + "|" + modelName);
             db.commit();
         }
     }
 
-    public Map<String, String> getAgentConfigs(String teamName) {
+    public Map<String, String> getAgentConfigs(String projectPath, String teamName) {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)
                     .valueSerializer(Serializer.STRING)
                     .createOrOpen();
             Map<String, String> teamConfigs = new HashMap<>();
-            String prefix = teamName + ":";
+            
+            // 1. Try Project+Team specific configs
+            String prefix = projectPath + ":" + teamName + ":";
             configs.forEach((k, v) -> {
                 String key = (String) k;
                 if (key.startsWith(prefix)) {
-                    // Return raw agent name as key
                     teamConfigs.put(key.substring(prefix.length()), (String) v);
-                } else if (!key.contains(":")) {
-                    // Fallback for legacy configs (global defaults) if no specific team config exists?
-                    // Or maybe we treat "default" team as the legacy holder. 
-                    // For now, let's strictly load team-specific configs to keep it clean.
-                    if ("default".equals(teamName)) {
-                         teamConfigs.put(key, (String) v);
-                    }
                 }
             });
+            
+            // 2. Fallback to Team-only configs (Legacy/Global defaults for that team)
+            // This ensures if I switch to a new project but use "default" team, I still get my global preferences
+            // unless overridden by project-specific settings.
+            if (teamConfigs.isEmpty()) {
+                String teamPrefix = teamName + ":";
+                configs.forEach((k, v) -> {
+                    String key = (String) k;
+                    // Check it DOESN'T have a project path (contains only one colon or starts with team name and no other colon before it?)
+                    // The legacy format was TEAM:AGENT. New is PROJECT:TEAM:AGENT.
+                    // If key starts with teamName: and does NOT contain another : (or rather, is not part of a project path)
+                    // Actually, legacy keys are just "TEAM:AGENT". New keys are "PROJECT:TEAM:AGENT".
+                    // So we check if key starts with teamPrefix AND key does NOT start with ANY project path.
+                    // A simple heuristic: Legacy keys have exactly one colon. New keys have at least two.
+                    // Windows paths have colons (C:\...), so splitting by colon is tricky.
+                    // Let's assume legacy keys were strictly "TEAM:AGENT".
+                    
+                    if (key.startsWith(teamPrefix) && !key.substring(teamPrefix.length()).contains(":")) {
+                         // This is a global team config
+                         String agent = key.substring(teamPrefix.length());
+                         teamConfigs.putIfAbsent(agent, (String) v);
+                    }
+                });
+            }
+            
             return teamConfigs;
         }
     }

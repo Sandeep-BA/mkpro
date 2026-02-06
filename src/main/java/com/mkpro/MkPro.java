@@ -22,6 +22,11 @@ import com.mkpro.models.AgentStat;
 import com.mkpro.models.Provider;
 import com.mkpro.models.RunnerType;
 import com.mkpro.agents.AgentManager;
+import com.mkpro.models.AgentsConfig;
+import com.mkpro.models.AgentDefinition;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 import java.io.IOException;
 import java.io.File;
@@ -341,30 +346,43 @@ public class MkPro {
 
     private static void runConsoleLoop(String apiKey, String summaryContext, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, InMemoryArtifactService artifactService, InMemoryMemoryService memoryService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
         
+        // Identify Current Project
+        String currentProjectPath = Paths.get("").toAbsolutePath().toString();
+
         // Load Team Selection first
         java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
         Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
 
-        // Initialize default configs for all agents
+        // Initialize default configs dynamically from Team YAML
         Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
         
-        // Defaults
+        // Always add Coordinator as base
         agentConfigs.put("Coordinator", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Coder", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("SysAdmin", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Tester", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DocWriter", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("SecurityAuditor", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Architect", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DatabaseAdmin", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DevOps", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DataAnalyst", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("GoalTracker", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("CodeEditor", new AgentConfig(initialProvider, initialModelName));
 
-        // Load overrides from Central Memory for the CURRENT TEAM
+        // Load agents from the selected team file
+        Path initialTeamPath = teamsDir.resolve(currentTeam.get() + ".yaml");
+        if (!Files.exists(initialTeamPath)) {
+            System.out.println(ANSI_BLUE + "Team file not found: " + initialTeamPath + ". Falling back to default.yaml" + ANSI_RESET);
+            initialTeamPath = teamsDir.resolve("default.yaml");
+        }
+
+        try (java.io.InputStream is = Files.newInputStream(initialTeamPath)) {
+            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+            com.mkpro.models.AgentsConfig config = mapper.readValue(is, com.mkpro.models.AgentsConfig.class);
+            for (com.mkpro.models.AgentDefinition def : config.getAgents()) {
+                // Initialize every agent found in YAML with default settings
+                agentConfigs.putIfAbsent(def.getName(), new AgentConfig(initialProvider, initialModelName));
+            }
+        } catch (Exception e) {
+            System.err.println(ANSI_BLUE + "Error loading team definition for config init: " + e.getMessage() + ANSI_RESET);
+            // Fallback defaults if parsing fails
+            agentConfigs.put("Coder", new AgentConfig(initialProvider, initialModelName));
+            agentConfigs.put("SysAdmin", new AgentConfig(initialProvider, initialModelName));
+        }
+
+        // Load overrides from Central Memory for the CURRENT TEAM and PROJECT
         try {
-            Map<String, String> storedConfigs = centralMemory.getAgentConfigs(currentTeam.get());
+            Map<String, String> storedConfigs = centralMemory.getAgentConfigs(currentProjectPath, currentTeam.get());
             for (Map.Entry<String, String> entry : storedConfigs.entrySet()) {
                 String agent = entry.getKey();
                 String val = entry.getValue();
@@ -539,6 +557,7 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /init       - Initialize project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /remember   - Analyze and save summary." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /export logs- Export all action logs to Markdown." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /reset      - Reset the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /compact    - Compact the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /summarize  - Generate session summary." + ANSI_RESET);
@@ -578,7 +597,7 @@ public class MkPro {
                             
                             // Reload configs for the new team
                             try {
-                                Map<String, String> newConfigs = centralMemory.getAgentConfigs(newTeamName);
+                                Map<String, String> newConfigs = centralMemory.getAgentConfigs(currentProjectPath, newTeamName);
                                 // Reset to defaults first? Or keep current as baseline?
                                 // Better to reset to defaults + new overrides to avoid leakage from previous team
                                 agentConfigs.replaceAll((k, v) -> new AgentConfig(initialProvider, initialModelName));
@@ -900,14 +919,14 @@ public class MkPro {
                     if (configureAllAgents) {
                         for (String agentName : agentConfigs.keySet()) {
                             agentConfigs.put(agentName, new AgentConfig(selectedProvider, selectedModel));
-                            centralMemory.saveAgentConfig(currentTeam.get(), agentName, selectedProvider.name(), selectedModel);
+                            centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), agentName, selectedProvider.name(), selectedModel);
                         }
                         fTerminal.writer().println(ANSI_BLUE + "Updated all agents to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         runner = runnerFactory.apply(currentRunnerType.get());
                         fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new configurations." + ANSI_RESET);
                     } else {
                         agentConfigs.put(selectedAgent, new AgentConfig(selectedProvider, selectedModel));
-                        centralMemory.saveAgentConfig(currentTeam.get(), selectedAgent, selectedProvider.name(), selectedModel);
+                        centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), selectedAgent, selectedProvider.name(), selectedModel);
                         fTerminal.writer().println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         
                         if ("Coordinator".equalsIgnoreCase(selectedAgent)) {
@@ -935,7 +954,7 @@ public class MkPro {
                             }
 
                             agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
-                            centralMemory.saveAgentConfig(currentTeam.get(), agentName, newProvider.name(), newModel);
+                            centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), agentName, newProvider.name(), newModel);
                             fTerminal.writer().println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
                             
                             if ("Coordinator".equalsIgnoreCase(agentName)) {
@@ -956,7 +975,45 @@ public class MkPro {
                 continue;
             }
 
-            if ("/reset".equalsIgnoreCase(line)) {
+            if ("/export logs".equalsIgnoreCase(line)) {
+                try {
+                    System.out.println(ANSI_BLUE + "Exporting action logs to markdown..." + ANSI_RESET);
+                    List<String> logs = logger.getLogs();
+                    StringBuilder md = new StringBuilder();
+                    md.append("# Action Logs Report\n\n");
+                    md.append("Generated on: ").append(java.time.LocalDateTime.now()).append("\n\n");
+                    
+                    for (String log : logs) {
+                        // Log format: [timestamp] ROLE: content
+                        // Let's try to parse it for better formatting
+                        int roleStart = log.indexOf("] ") + 2;
+                        int contentStart = log.indexOf(": ", roleStart);
+                        
+                        if (roleStart > 1 && contentStart > roleStart) {
+                            String timestamp = log.substring(1, roleStart - 2);
+                            String role = log.substring(roleStart, contentStart);
+                            String content = log.substring(contentStart + 2);
+                            
+                            md.append("### ").append(role).append(" - ").append(timestamp).append("\n\n");
+                            md.append(content).append("\n\n");
+                            md.append("---\n\n");
+                        } else {
+                            // Fallback
+                            md.append(log).append("\n\n");
+                        }
+                    }
+                    
+                    Path reportPath = Paths.get("action_logs_report.md");
+                    Files.writeString(reportPath, md.toString());
+                    System.out.println(ANSI_BRIGHT_GREEN + "Successfully exported logs to: " + reportPath.toAbsolutePath() + ANSI_RESET);
+                } catch (Exception e) {
+                    System.err.println(ANSI_BLUE + "Error exporting logs: " + e.getMessage() + ANSI_RESET);
+                }
+                continue;
+            }
+
+            if ("/init".equalsIgnoreCase(line)) {
+
                 currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
                 saveSessionId(currentSession.id());
                 System.out.println(ANSI_BLUE + "System: Session reset. New session ID: " + currentSession.id() + ANSI_RESET);
