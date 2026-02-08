@@ -27,6 +27,20 @@ import java.time.Duration;
 import java.util.Scanner;
 import java.util.Arrays;
 
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.MapDBVectorStore;
+import com.google.adk.memory.Vector;
+
+import com.mkpro.IndexingHelper;
+
 public class MkProTools {
 
     public static final String ANSI_RESET = "\u001b[0m";
@@ -34,6 +48,203 @@ public class MkProTools {
     public static final String ANSI_YELLOW = "\u001b[33m";
     public static final String ANSI_RED = "\u001b[31m";
     public static final String ANSI_GREEN = "\u001b[32m";
+
+    public static BaseTool createSearchCodebaseTool(MapDBVectorStore vectorStore, EmbeddingService embeddingService) {
+        return new BaseTool(
+                "search_codebase",
+                "Semantically searches the codebase using vector embeddings. Use this to find relevant code snippets based on meaning."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "query", Schema.builder()
+                                                .type("STRING")
+                                                .description("The search query describing what code you are looking for.")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("query"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String query = (String) args.get("query");
+                System.out.println(ANSI_BLUE + "[VectorSearch] Searching for: " + query + ANSI_RESET);
+                
+                return embeddingService.generateEmbedding(query)
+                    .map(embedding -> {
+                        // Ensure embedding is float[] if ADK expects it, or double[]. 
+                        // Checking ADK docs/source previously: generateEmbedding returns Single<double[]>.n                        // VectorStore.searchVectors likely takes double[].
+                        
+                        List<Vector> results = vectorStore.searchTopNVectors( embedding, 0.0, 5); // Top 5, threshold 0.6
+                        
+                        if (results.isEmpty()) {
+                            return Collections.singletonMap("result", "No relevant code found for query: " + query);
+                        }
+                        
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Found ").append(results.size()).append(" relevant snippets:\n\n");
+                        
+                        for (int i = 0; i < results.size(); i++) {
+                            Vector res = results.get(i);
+                         
+                            // Assuming MemoryEntry content format "FilePath: ... \n Content" or just Content.
+                            // We can format it nicely.
+                            //sb.append("--- Match ").append(i + 1).append(" (Score: ").append(String.format("%.2f", res.)).append(") ---\n");
+                            sb.append(res.getContent()); 
+                            sb.append("\n\n");
+                        }
+                        
+                        return Collections.<String, Object>singletonMap("result", sb.toString());
+                    });
+                  //  .onErrorReturn(e -> Collections.singletonMap("error", "Vector search failed: " + e.getMessage()));
+            }
+        };
+    }
+
+    public static BaseTool createReadClipboardTool() {
+        return new BaseTool(
+                "read_clipboard",
+                "Reads content from the system clipboard. Supports text and images. Images are saved to a temporary file."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(Collections.emptyMap())
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                System.out.println(ANSI_BLUE + "[System] Reading clipboard..." + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        // Check for headless mode, though on many servers this might just fail or return empty
+                        if (java.awt.GraphicsEnvironment.isHeadless()) {
+                             return Collections.singletonMap("error", "Cannot access clipboard in headless mode.");
+                        }
+
+                        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+                        Transferable contents = clipboard.getContents(null);
+
+                        if (contents == null) {
+                            return Collections.singletonMap("error", "Clipboard is empty.");
+                        }
+
+                        if (contents.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+                            String text = (String) contents.getTransferData(DataFlavor.stringFlavor);
+                            // Truncate if too long? For now, let's keep it reasonable.
+                            if (text.length() > 20000) {
+                                text = text.substring(0, 20000) + "\n...[truncated]";
+                            }
+                            return ImmutableMap.of(
+                                "type", "text",
+                                "content", text
+                            );
+                        } else if (contents.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                            BufferedImage image = (BufferedImage) contents.getTransferData(DataFlavor.imageFlavor);
+                            
+                            // Save to temp file
+                            String tempDir = System.getProperty("java.io.tmpdir");
+                            String fileName = "clipboard_" + System.currentTimeMillis() + ".png";
+                            File outputFile = new File(tempDir, fileName);
+                            
+                            ImageIO.write(image, "png", outputFile);
+                            
+                            return ImmutableMap.of(
+                                "type", "image",
+                                "file_path", outputFile.getAbsolutePath(),
+                                "info", "Image saved to temporary file."
+                            );
+                        } else {
+                            return Collections.singletonMap("error", "Clipboard content type not supported (only text or image).");
+                        }
+
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Failed to read clipboard: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createImageCropTool() {
+        return new BaseTool(
+                "image_crop",
+                "Crops an image to the specified dimensions. Useful for focusing on specific UI elements or regions."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "image_path", Schema.builder().type("STRING").description("Path to the image file.").build(),
+                                        "x", Schema.builder().type("INTEGER").description("Starting X coordinate.").build(),
+                                        "y", Schema.builder().type("INTEGER").description("Starting Y coordinate.").build(),
+                                        "width", Schema.builder().type("INTEGER").description("Width of the cropped area.").build(),
+                                        "height", Schema.builder().type("INTEGER").description("Height of the cropped area.").build()
+                                ))
+                                .required(ImmutableList.of("image_path", "x", "y", "width", "height"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String imagePath = (String) args.get("image_path");
+                int x = ((Double) args.get("x")).intValue();
+                int y = ((Double) args.get("y")).intValue();
+                int width = ((Double) args.get("width")).intValue();
+                int height = ((Double) args.get("height")).intValue();
+
+                System.out.println(ANSI_BLUE + "[System] Cropping image: " + imagePath + " [" + x + "," + y + " " + width + "x" + height + "]" + ANSI_RESET);
+
+                return Single.fromCallable(() -> {
+                    try {
+                        File inputFile = new File(imagePath);
+                        if (!inputFile.exists()) {
+                            return Collections.singletonMap("error", "Image file not found: " + imagePath);
+                        }
+
+                        BufferedImage originalImage = ImageIO.read(inputFile);
+                        
+                        // Bounds check
+                        if (x < 0 || y < 0 || x + width > originalImage.getWidth() || y + height > originalImage.getHeight()) {
+                             return Collections.singletonMap("error", String.format("Crop coordinates out of bounds. Image size: %dx%d", originalImage.getWidth(), originalImage.getHeight()));
+                        }
+
+                        BufferedImage croppedImage = originalImage.getSubimage(x, y, width, height);
+                        
+                        // Save back to same file
+                        String format = imagePath.toLowerCase().endsWith(".png") ? "png" : "jpg";
+                        ImageIO.write(croppedImage, format, inputFile);
+
+                        return ImmutableMap.of(
+                            "status", "Image cropped successfully.",
+                            "image_path", imagePath,
+                            "new_size", width + "x" + height
+                        );
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Failed to crop image: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
 
     public static BaseTool createSafeWriteFileTool() {
         return new BaseTool(
@@ -128,9 +339,37 @@ public class MkProTools {
                         }
 
                         System.out.println(ANSI_BLUE + "---------------------------------------------" + ANSI_RESET);
-                        System.out.print(ANSI_YELLOW + "Apply these changes? [y/N]: " + ANSI_RESET);
+                        
+                        // Auto-approve logic
+                        System.out.print(ANSI_YELLOW + "Auto-approving in 7s... (Press Enter to pause/reject) " + ANSI_RESET);
+                        
+                        boolean interrupted = false;
+                        for (int i = 7; i > 0; i--) {
+                            System.out.print("\r" + ANSI_YELLOW + "Auto-approving in " + i + "s... (Press Enter to pause/reject)   " + ANSI_RESET);
+                            // Check if input is available (non-blocking check)
+                            try {
+                                if (System.in.available() > 0) {
+                                    interrupted = true;
+                                    break;
+                                }
+                                Thread.sleep(1000);
+                            } catch (Exception e) {
+                                // Ignore
+                            }
+                        }
+                        System.out.println(); // Newline
 
-                        // Read from Console
+                        if (!interrupted) {
+                            System.out.println(ANSI_GREEN + "Time's up! Auto-approving changes." + ANSI_RESET);
+                            if (path.getParent() != null) {
+                                Files.createDirectories(path.getParent());
+                            }
+                            Files.writeString(path, newContent, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
+                            return Collections.singletonMap("status", "File written successfully (Auto-approved): " + filePath);
+                        }
+
+                        // Fallback to manual confirmation if interrupted
+                        System.out.print(ANSI_YELLOW + "Apply these changes? [y/N]: " + ANSI_RESET);
                         Scanner scanner = new Scanner(System.in);
                         if (scanner.hasNextLine()) {
                             String input = scanner.nextLine().trim();
@@ -333,6 +572,7 @@ public class MkProTools {
                     try {
                         HttpRequest request = HttpRequest.newBuilder()
                                 .uri(URI.create(url))
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                                 .timeout(Duration.ofSeconds(20))
                                 .GET()
                                 .build();
@@ -358,6 +598,126 @@ public class MkProTools {
                     } catch (Exception e) {
                         return Collections.singletonMap("error", "Failed to fetch URL: " + e.getMessage());
                     }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createGoogleSearchTool() {
+        return new BaseTool(
+                "google_search",
+                "Performs a Google search for the given query and returns the results as text."
+        ) {
+            private final HttpClient client = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "query", Schema.builder()
+                                                .type("STRING")
+                                                .description("The search query.")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("query"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String query = (String) args.get("query");
+                System.out.println(ANSI_BLUE + "[Search] Googling: " + query + ANSI_RESET);
+                return Single.fromCallable(() -> {
+                    try {
+                        String encodedQuery = java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8);
+                        String url = "https://www.google.com/search?q=" + encodedQuery;
+                        
+                        HttpRequest request = HttpRequest.newBuilder()
+                                .uri(URI.create(url))
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                                .timeout(Duration.ofSeconds(20))
+                                .GET()
+                                .build();
+
+                        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                        
+                        if (response.statusCode() >= 400) {
+                            return Collections.singletonMap("error", "HTTP Error: " + response.statusCode());
+                        }
+
+                        String html = response.body();
+                        // Basic cleanup to extract readable text
+                        String text = html.replaceAll("(?s)<style.*?>.*?</style>", "")
+                                          .replaceAll("(?s)<script.*?>.*?</script>", "")
+                                          .replaceAll("<[^>]+>", " ")
+                                          .replaceAll("\\s+", " ")
+                                          .trim();
+                        
+                        if (text.length() > 20000) {
+                            text = text.substring(0, 20000) + "\n...[truncated]";
+                        }
+                        
+                        return Collections.singletonMap("results", text);
+                    } catch (Exception e) {
+                        return Collections.singletonMap("error", "Search failed: " + e.getMessage());
+                    }
+                });
+            }
+        };
+    }
+
+    public static BaseTool createMultiProjectSearchTool(EmbeddingService embeddingService) {
+        return new BaseTool(
+                "search_multi_project",
+                "Semantically searches across multiple project vector stores. Use this to find code or information from other indexed projects."
+        ) {
+            @Override
+            public Optional<FunctionDeclaration> declaration() {
+                return Optional.of(FunctionDeclaration.builder()
+                        .name(name())
+                        .description(description())
+                        .parameters(Schema.builder()
+                                .type("OBJECT")
+                                .properties(ImmutableMap.of(
+                                        "query", Schema.builder()
+                                                .type("STRING")
+                                                .description("The search query.")
+                                                .build(),
+                                        "projects", Schema.builder()
+                                                .type("ARRAY")
+                                                .items(Schema.builder().type("STRING").build())
+                                                .description("Optional list of project names (folder names) to search. If omitted, searches all.")
+                                                .build(),
+                                        "limit", Schema.builder()
+                                                .type("INTEGER")
+                                                .description("Max results per project (default 5).")
+                                                .build()
+                                ))
+                                .required(ImmutableList.of("query"))
+                                .build())
+                        .build());
+            }
+
+            @Override
+            public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
+                String query = (String) args.get("query");
+                List<String> projects = (List<String>) args.get("projects");
+                Double limitD = (Double) args.get("limit"); // JSON numbers often come as Double
+                int limit = limitD != null ? limitD.intValue() : 5;
+
+                System.out.println(ANSI_BLUE + "[MultiVectorSearch] Searching for: " + query + ANSI_RESET);
+                
+                return Single.fromCallable(() -> {
+                    String result = IndexingHelper.searchMultipleProjects(query, projects, embeddingService, limit);
+                    return Collections.singletonMap("result", result);
                 });
             }
         };

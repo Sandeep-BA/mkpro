@@ -33,22 +33,27 @@ import com.mkpro.tools.MkProTools;
 import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.VectorStore;
+
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.Files;
 import java.time.LocalDate;
-import java.util.Collections;
+import java.io.InputStream;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Collections;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.google.adk.memory.MapDBVectorStore;
 import com.mkpro.models.AgentDefinition;
 import com.mkpro.models.AgentsConfig;
-import java.nio.file.Path;
-import java.nio.file.Files;
-import java.io.InputStream;
-import java.util.HashMap;
+// ... (rest of imports)
 
 public class AgentManager {
 
@@ -56,10 +61,13 @@ public class AgentManager {
     private final InMemoryArtifactService artifactService;
     private final InMemoryMemoryService memoryService;
     private final String apiKey;
+    private final String ollamaServerUrl;
     private final ActionLogger logger;
     private final CentralMemory centralMemory;
     private final RunnerType runnerType;
     private final Map<String, AgentDefinition> agentDefinitions;
+    private final MapDBVectorStore vectorStore;
+    private final EmbeddingService embeddingService;
 
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BLUE = "\u001b[34m";
@@ -91,18 +99,24 @@ public class AgentManager {
                         InMemoryArtifactService artifactService, 
                         InMemoryMemoryService memoryService, 
                         String apiKey,
+                        String ollamaServerUrl,
                         ActionLogger logger,
                         CentralMemory centralMemory,
                         RunnerType runnerType,
-                        Path teamFilePath) {
+                        Path teamFilePath,
+                        MapDBVectorStore vectorStore,
+                        EmbeddingService embeddingService) {
         this.sessionService = sessionService;
         this.artifactService = artifactService;
         this.memoryService = memoryService;
         this.apiKey = apiKey;
+        this.ollamaServerUrl = ollamaServerUrl;
         this.logger = logger;
         this.centralMemory = centralMemory;
         this.runnerType = runnerType;
         this.agentDefinitions = loadAgentDefinitions(teamFilePath);
+        this.vectorStore = vectorStore;
+        this.embeddingService = embeddingService;
     }
 
     private Map<String, AgentDefinition> loadAgentDefinitions(Path teamFilePath) {
@@ -138,12 +152,18 @@ public class AgentManager {
         // coderTools.add(MkProTools.createWriteFileTool()); // Removed direct write access
         coderTools.add(MkProTools.createListDirTool());
         coderTools.add(MkProTools.createReadImageTool());
+        coderTools.add(MkProTools.createReadClipboardTool());
+        coderTools.add(MkProTools.createImageCropTool());
+        if (vectorStore != null && embeddingService != null) {
+            coderTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+        }
 
         List<BaseTool> sysAdminTools = new ArrayList<>();
         sysAdminTools.add(MkProTools.createRunShellTool());
+        sysAdminTools.add(MkProTools.createImageCropTool());
 
         List<BaseTool> testerTools = new ArrayList<>();
-        testerTools.addAll(coderTools); // Read/Write/List/Image
+        testerTools.addAll(coderTools); // Read/Write/List/Image/Clipboard
         testerTools.add(MkProTools.createRunShellTool());
 
         List<BaseTool> docWriterTools = new ArrayList<>();
@@ -154,11 +174,18 @@ public class AgentManager {
         List<BaseTool> securityAuditorTools = new ArrayList<>();
         securityAuditorTools.addAll(coderTools); // Read/Analyze code
         securityAuditorTools.add(MkProTools.createRunShellTool()); // Run audit tools
+        if (embeddingService != null) {
+            securityAuditorTools.add(MkProTools.createMultiProjectSearchTool(embeddingService));
+        }
 
         List<BaseTool> architectTools = new ArrayList<>();
         architectTools.add(MkProTools.createReadFileTool());
         architectTools.add(MkProTools.createListDirTool());
         architectTools.add(MkProTools.createReadImageTool());
+        if (vectorStore != null && embeddingService != null) {
+            architectTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+            architectTools.add(MkProTools.createMultiProjectSearchTool(embeddingService));
+        }
 
         List<BaseTool> databaseTools = new ArrayList<>();
         databaseTools.addAll(coderTools); // Read/Write SQL files, schemas
@@ -188,33 +215,92 @@ public class AgentManager {
         testerTools.addAll(webTools);
         docWriterTools.addAll(webTools);
 
+        // Dynamically assign tools based on agent roles/names
+        Map<String, List<BaseTool>> toolMap = new HashMap<>();
+        
+        for (String agentName : agentConfigs.keySet()) {
+            if ("Coordinator".equals(agentName)) continue; // Coordinator handled separately
+
+            List<BaseTool> toolsForAgent = new ArrayList<>();
+            
+            // Heuristic role assignment
+            if (agentName.contains("Tester") || agentName.contains("QA")) {
+                toolsForAgent.addAll(testerTools);
+            } else if (agentName.contains("SysAdmin")) {
+                toolsForAgent.addAll(sysAdminTools);
+            } else if (agentName.contains("DocWriter")) {
+                toolsForAgent.addAll(docWriterTools);
+            } else if (agentName.contains("Security")) {
+                toolsForAgent.addAll(securityAuditorTools);
+            } else if (agentName.contains("Architect")) {
+                toolsForAgent.addAll(architectTools);
+            } else if (agentName.contains("Database") || agentName.contains("DBA")) {
+                toolsForAgent.addAll(databaseTools);
+            } else if (agentName.contains("DevOps") || agentName.contains("SRE")) {
+                toolsForAgent.addAll(devOpsTools);
+            } else if (agentName.contains("Analyst") || agentName.contains("Data")) {
+                toolsForAgent.addAll(dataAnalystTools);
+            } else if (agentName.contains("Goal") || agentName.contains("Tracker")) {
+                toolsForAgent.addAll(goalTrackerTools);
+            } else if (agentName.contains("CodeEditor")) {
+                toolsForAgent.addAll(codeEditorTools);
+            } else {
+                // Default fallback for any other "Coder" or custom agent (e.g. JavaCoder, PythonCoder)
+                // They get the standard coder toolset
+                toolsForAgent.addAll(coderTools);
+            }
+            
+            toolMap.put(agentName, toolsForAgent);
+        }
+
+        toolMap.forEach((name, tools) -> {
+            AgentConfig config = agentConfigs.get(name);
+            if (config != null && config.getProvider() == Provider.GEMINI) {
+                tools.add(MkProTools.createGoogleSearchTool());
+                // Avoid adding UrlFetchTool if already present (unlikely for most, but Tester/DocWriter have webTools)
+                // Actually webTools has SeleniumTools, not UrlFetchTool. UrlFetchTool is lightweight.
+                tools.add(MkProTools.createUrlFetchTool());
+            }
+        });
+
         // Delegation Tools
         List<BaseTool> coordinatorTools = new ArrayList<>();
         coordinatorTools.addAll(webTools); // Give Coordinator direct web access for research
         
         // Coder Sub-Agents
-        coordinatorTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
-        // Note: CodeEditor is a sub-agent of Coder in strict hierarchy, but here added to Coordinator for direct debugging if needed? 
-        // Wait, previous code added it to `coderTools`. Let's stick to that.
-        
-        // Re-adding `ask_code_editor` to `coderTools` NOT coordinatorTools directly, unless specified.
-        // The previous code had: `coderTools.add(createDelegationTool(..., "CodeEditor", ...))`
-        coderTools.add(createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo));
+        BaseTool codeEditorTool = createDelegationToolFromDef("CodeEditor", "ask_code_editor", agentConfigs, codeEditorTools, contextInfo);
+        if (codeEditorTool != null) {
+            coordinatorTools.add(codeEditorTool);
+            // We don't necessarily need to add CodeEditor to every "Coder" anymore if they are specialized
+            // But let's keep it available to anyone with 'coderTools' just in case? 
+            // Actually, best to let Coordinator handle delegation to Editor or specialized coders handle it.
+            // For simplicity in this refactor, we won't auto-inject ask_code_editor into every agent yet.
+        }
 
+        // Add delegation tools for ALL agents found in the config
+        for (String agentName : toolMap.keySet()) {
+            // Skip CodeEditor as it's already added or special
+            if ("CodeEditor".equals(agentName)) continue;
 
-        coordinatorTools.add(createDelegationToolFromDef("GoalTracker", "ask_goal_tracker", agentConfigs, goalTrackerTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Coder", "ask_coder", agentConfigs, coderTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("SysAdmin", "ask_sysadmin", agentConfigs, sysAdminTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Tester", "ask_tester", agentConfigs, testerTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DocWriter", "ask_doc_writer", agentConfigs, docWriterTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("SecurityAuditor", "ask_security_auditor", agentConfigs, securityAuditorTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("Architect", "ask_architect", agentConfigs, architectTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DatabaseAdmin", "ask_database_admin", agentConfigs, databaseTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DevOps", "ask_devops", agentConfigs, devOpsTools, contextInfo));
-        coordinatorTools.add(createDelegationToolFromDef("DataAnalyst", "ask_data_analyst", agentConfigs, dataAnalystTools, contextInfo));
+            String toolName = "ask_" + agentName.replaceAll("([a-z])([A-Z]+)", "$1_$2").toLowerCase();
+            BaseTool tool = createDelegationToolFromDef(agentName, toolName, agentConfigs, toolMap.get(agentName), contextInfo);
+            if (tool != null) {
+                coordinatorTools.add(tool);
+            }
+        }
 
         // Add Coordinator-specific tools
+        if (vectorStore != null && embeddingService != null) {
+            coordinatorTools.add(MkProTools.createSearchCodebaseTool(vectorStore, embeddingService));
+        }
+        if (embeddingService != null) {
+            coordinatorTools.add(MkProTools.createMultiProjectSearchTool(embeddingService));
+        }
         coordinatorTools.add(MkProTools.createUrlFetchTool());
+        if (coordConfig.getProvider() == Provider.GEMINI) {
+             coordinatorTools.add(MkProTools.createGoogleSearchTool());
+        }
+        coordinatorTools.add(MkProTools.createReadClipboardTool());
         coordinatorTools.add(MkProTools.createGetActionLogsTool(logger));
         coordinatorTools.add(MkProTools.createSaveMemoryTool(centralMemory));
         coordinatorTools.add(MkProTools.createReadMemoryTool(centralMemory));
@@ -241,7 +327,8 @@ public class AgentManager {
                                                  String contextInfo) {
         AgentDefinition def = agentDefinitions.get(agentName);
         if (def == null) {
-            throw new RuntimeException("Definition not found for agent: " + agentName);
+            // Silently skip missing agents
+            return null;
         }
         return createDelegationTool(toolName, def.getDescription(), agentName, BASE_AGENT_POLICY + "\n" + def.getInstruction(), agentConfigs, subAgentTools, contextInfo);
     }
@@ -283,7 +370,7 @@ public class AgentManager {
         } else if (config.getProvider() == Provider.BEDROCK) {
             return new BedrockBaseLM(config.getModelName(), null);
         } else {
-            return new OllamaBaseLM(config.getModelName(), "http://localhost:11434");
+            return new OllamaBaseLM(config.getModelName(), ollamaServerUrl);
         }
     }
 

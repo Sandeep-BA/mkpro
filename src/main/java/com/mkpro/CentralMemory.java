@@ -76,19 +76,68 @@ public class CentralMemory {
         }
     }
 
-    public void saveAgentConfig(String agentName, String provider, String modelName) {
+    public void saveAgentConfig(String projectPath, String teamName, String agentName, String provider, String modelName) {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)
                     .valueSerializer(Serializer.STRING)
                     .createOrOpen();
-            // Format: PROVIDER|MODEL
-            configs.put(agentName, provider + "|" + modelName);
+            // Format Key: PROJECT:TEAM:AGENT -> Format Value: PROVIDER|MODEL
+            // We hash the project path to keep keys reasonably short/safe, or just use it directly. 
+            // Using direct string is simpler for debug.
+            String key = projectPath + ":" + teamName + ":" + agentName;
+            configs.put(key, provider + "|" + modelName);
             db.commit();
         }
     }
 
-    public Map<String, String> getAgentConfigs() {
+    public Map<String, String> getAgentConfigs(String projectPath, String teamName) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> configs = db.hashMap("agent_configs")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            Map<String, String> teamConfigs = new HashMap<>();
+            
+            // 1. Try Project+Team specific configs
+            String prefix = projectPath + ":" + teamName + ":";
+            configs.forEach((k, v) -> {
+                String key = (String) k;
+                if (key.startsWith(prefix)) {
+                    teamConfigs.put(key.substring(prefix.length()), (String) v);
+                }
+            });
+            
+            // 2. Fallback to Team-only configs (Legacy/Global defaults for that team)
+            // This ensures if I switch to a new project but use "default" team, I still get my global preferences
+            // unless overridden by project-specific settings.
+            if (teamConfigs.isEmpty()) {
+                String teamPrefix = teamName + ":";
+                configs.forEach((k, v) -> {
+                    String key = (String) k;
+                    // Check it DOESN'T have a project path (contains only one colon or starts with team name and no other colon before it?)
+                    // The legacy format was TEAM:AGENT. New is PROJECT:TEAM:AGENT.
+                    // If key starts with teamName: and does NOT contain another : (or rather, is not part of a project path)
+                    // Actually, legacy keys are just "TEAM:AGENT". New keys are "PROJECT:TEAM:AGENT".
+                    // So we check if key starts with teamPrefix AND key does NOT start with ANY project path.
+                    // A simple heuristic: Legacy keys have exactly one colon. New keys have at least two.
+                    // Windows paths have colons (C:\...), so splitting by colon is tricky.
+                    // Let's assume legacy keys were strictly "TEAM:AGENT".
+                    
+                    if (key.startsWith(teamPrefix) && !key.substring(teamPrefix.length()).contains(":")) {
+                         // This is a global team config
+                         String agent = key.substring(teamPrefix.length());
+                         teamConfigs.putIfAbsent(agent, (String) v);
+                    }
+                });
+            }
+            
+            return teamConfigs;
+        }
+    }
+
+    // Legacy method for backward compatibility if needed, or just to list all
+    public Map<String, String> getAllAgentConfigs() {
         try (DB db = openDB()) {
             HTreeMap<String, String> configs = db.hashMap("agent_configs")
                     .keySerializer(Serializer.STRING)
@@ -118,7 +167,58 @@ public class CentralMemory {
         }
     }
 
-    // --- Goal Tracking ---
+    // --- Ollama Configuration ---
+
+    public void saveOllamaServers(List<String> servers) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            // Store as comma-separated string
+            config.put("servers", String.join(",", servers));
+            db.commit();
+        }
+    }
+
+    public List<String> getOllamaServers() {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            String servers = config.get("servers");
+            if (servers == null || servers.isEmpty()) {
+                // Default
+                List<String> defaults = new ArrayList<>();
+                defaults.add("http://localhost:11434");
+                return defaults;
+            }
+            return new ArrayList<>(List.of(servers.split(",")));
+        }
+    }
+
+    public void saveSelectedOllamaServer(String url) {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            config.put("selected_server", url);
+            db.commit();
+        }
+    }
+
+    public String getSelectedOllamaServer() {
+        try (DB db = openDB()) {
+            HTreeMap<String, String> config = db.hashMap("ollama_config")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.STRING)
+                    .createOrOpen();
+            String selected = config.get("selected_server");
+            return selected != null ? selected : "http://localhost:11434";
+        }
+    }
 
     public void addGoal(String projectPath, com.mkpro.models.Goal goal) {
         try (DB db = openDB()) {

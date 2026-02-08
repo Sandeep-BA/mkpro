@@ -12,11 +12,21 @@ import com.google.adk.memory.InMemoryMemoryService;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 
+import com.google.adk.memory.Vector;
+import com.google.adk.memory.EmbeddingService;
+import com.google.adk.memory.VectorStore;
+import com.google.adk.memory.MemoryEntry;
+
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.AgentStat;
 import com.mkpro.models.Provider;
 import com.mkpro.models.RunnerType;
 import com.mkpro.agents.AgentManager;
+import com.mkpro.models.AgentsConfig;
+import com.mkpro.models.AgentDefinition;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 import java.io.IOException;
 import java.io.File;
@@ -39,11 +49,20 @@ import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+
 import com.google.genai.types.GenerateContentResponse;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.EndOfFileException;
+import org.jline.reader.Widget;
+import org.jline.reader.Reference;
+import org.jline.keymap.KeyMap;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import io.reactivex.rxjava3.disposables.Disposable;
@@ -51,6 +70,7 @@ import io.reactivex.rxjava3.disposables.Disposable;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import com.google.adk.memory.MapDBVectorStore;
 
 public class MkPro {
 
@@ -85,6 +105,39 @@ public class MkPro {
         "meta.llama3-8b-instruct-v1:0",
         "amazon.titan-text-express-v1"
     );
+
+    // Reusable Clipboard Handler
+    private static String handleClipboardPaste(Terminal term) {
+        try {
+            if (java.awt.GraphicsEnvironment.isHeadless()) return null;
+
+            Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
+            if (c == null) return null;
+
+            if (c.isDataFlavorAvailable(DataFlavor.imageFlavor)) {
+                BufferedImage img = (BufferedImage) c.getData(DataFlavor.imageFlavor);
+                String tempDir = System.getProperty("java.io.tmpdir");
+                String fileName = "pasted_image_" + System.currentTimeMillis() + ".png";
+                File outputFile = new File(tempDir, fileName);
+                ImageIO.write(img, "png", outputFile);
+                
+                String pathStr = outputFile.getAbsolutePath();
+                String result = "\"" + pathStr + "\" ";
+                
+                // Notify user visibly using terminal writer with explicit CRLF
+                term.writer().print("\r\n" + ANSI_BLUE + "[System] Image pasted and saved to: " + pathStr + ANSI_RESET + "\r\n");
+                term.writer().print(ANSI_BLUE + "[System] Image path added to buffer." + ANSI_RESET + "\r\n");
+                term.flush();
+                
+                return result;
+            } else if (c.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                return (String) c.getData(DataFlavor.stringFlavor);
+            }
+        } catch (Exception e) {
+            // Fail silently
+        }
+        return null;
+    }
 
     public static void main(String[] args) {
         // Check for flags
@@ -191,7 +244,8 @@ public class MkPro {
             
             // Default builder for UI
             java.util.function.BiFunction<Map<String, AgentConfig>, RunnerType, Runner> uiRunnerBuilder = (agentConfigs, rType) -> {
-                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamsDir.resolve("default.yaml"));
+                String ollamaUrl = centralMemory.getSelectedOllamaServer();
+                AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamsDir.resolve("default.yaml"), null, null);
                 return am.createRunner(agentConfigs, finalSummaryContext);
             };
 
@@ -231,6 +285,15 @@ public class MkPro {
                 try (var is = MkPro.class.getResourceAsStream("/teams/minimal.yaml")) {
                     if (is != null) {
                         Files.copy(is, minimalTeamPath);
+                    }
+                }
+            }
+            // Also copy adk_updater.yaml for reference
+            Path adkUpdaterTeamPath = teamsDir.resolve("adk_updater.yaml");
+            if (!Files.exists(adkUpdaterTeamPath)) {
+                try (var is = MkPro.class.getResourceAsStream("/teams/adk_updater.yaml")) {
+                    if (is != null) {
+                        Files.copy(is, adkUpdaterTeamPath);
                     }
                 }
             }
@@ -282,26 +345,44 @@ public class MkPro {
     }
 
     private static void runConsoleLoop(String apiKey, String summaryContext, java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType, String initialModelName, Provider initialProvider, Session initialSession, InMemorySessionService sessionService, InMemoryArtifactService artifactService, InMemoryMemoryService memoryService, CentralMemory centralMemory, ActionLogger logger, boolean verbose) {
-        // Initialize default configs for all agents
+        
+        // Identify Current Project
+        String currentProjectPath = Paths.get("").toAbsolutePath().toString();
+
+        // Load Team Selection first
+        java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
+        Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
+
+        // Initialize default configs dynamically from Team YAML
         Map<String, AgentConfig> agentConfigs = new java.util.HashMap<>();
         
-        // Defaults
+        // Always add Coordinator as base
         agentConfigs.put("Coordinator", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Coder", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("SysAdmin", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Tester", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DocWriter", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("SecurityAuditor", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("Architect", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DatabaseAdmin", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DevOps", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("DataAnalyst", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("GoalTracker", new AgentConfig(initialProvider, initialModelName));
-        agentConfigs.put("CodeEditor", new AgentConfig(initialProvider, initialModelName));
 
-        // Load overrides from Central Memory
+        // Load agents from the selected team file
+        Path initialTeamPath = teamsDir.resolve(currentTeam.get() + ".yaml");
+        if (!Files.exists(initialTeamPath)) {
+            System.out.println(ANSI_BLUE + "Team file not found: " + initialTeamPath + ". Falling back to default.yaml" + ANSI_RESET);
+            initialTeamPath = teamsDir.resolve("default.yaml");
+        }
+
+        try (java.io.InputStream is = Files.newInputStream(initialTeamPath)) {
+            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+            com.mkpro.models.AgentsConfig config = mapper.readValue(is, com.mkpro.models.AgentsConfig.class);
+            for (com.mkpro.models.AgentDefinition def : config.getAgents()) {
+                // Initialize every agent found in YAML with default settings
+                agentConfigs.putIfAbsent(def.getName(), new AgentConfig(initialProvider, initialModelName));
+            }
+        } catch (Exception e) {
+            System.err.println(ANSI_BLUE + "Error loading team definition for config init: " + e.getMessage() + ANSI_RESET);
+            // Fallback defaults if parsing fails
+            agentConfigs.put("Coder", new AgentConfig(initialProvider, initialModelName));
+            agentConfigs.put("SysAdmin", new AgentConfig(initialProvider, initialModelName));
+        }
+
+        // Load overrides from Central Memory for the CURRENT TEAM and PROJECT
         try {
-            Map<String, String> storedConfigs = centralMemory.getAgentConfigs();
+            Map<String, String> storedConfigs = centralMemory.getAgentConfigs(currentProjectPath, currentTeam.get());
             for (Map.Entry<String, String> entry : storedConfigs.entrySet()) {
                 String agent = entry.getKey();
                 String val = entry.getValue();
@@ -320,6 +401,11 @@ public class MkPro {
             System.err.println(ANSI_BLUE + "Warning: Failed to load agent configs from central memory: " + e.getMessage() + ANSI_RESET);
         }
 
+        // Vector Store Init
+        EmbeddingService embeddingService = IndexingHelper.createEmbeddingService();
+        String projectName = Paths.get("").toAbsolutePath().getFileName().toString();
+        MapDBVectorStore vectorStore = IndexingHelper.getOrCreateStore(projectName);
+
         // Inject recent history from ActionLogger
         List<String> recentLogs = logger.getRecentLogs(10);
         StringBuilder historyContext = new StringBuilder();
@@ -329,20 +415,19 @@ public class MkPro {
                 historyContext.append(log).append("\n");
             }
         }
+              
         
         String augmentedContext = summaryContext + historyContext.toString();
 
         // Runner Building Logic
-        java.util.concurrent.atomic.AtomicReference<String> currentTeam = new java.util.concurrent.atomic.AtomicReference<>(loadTeamSelection());
-        Path teamsDir = Paths.get(System.getProperty("user.home"), ".mkpro", "teams");
-
         java.util.function.Function<RunnerType, Runner> runnerFactory = (rType) -> {
             Path teamPath = teamsDir.resolve(currentTeam.get() + ".yaml");
             if (!Files.exists(teamPath)) {
                 System.out.println(ANSI_BLUE + "Team file not found: " + teamPath + ". Falling back to default.yaml" + ANSI_RESET);
                 teamPath = teamsDir.resolve("default.yaml");
             }
-            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, logger, centralMemory, rType, teamPath);
+            String ollamaUrl = centralMemory.getSelectedOllamaServer();
+            AgentManager am = new AgentManager(sessionService, artifactService, memoryService, apiKey, ollamaUrl, logger, centralMemory, rType, teamPath, vectorStore, embeddingService);
             return am.createRunner(agentConfigs, augmentedContext);
         };
 
@@ -377,6 +462,56 @@ public class MkPro {
         try {
             terminal = TerminalBuilder.builder().system(true).build();
             lineReader = LineReaderBuilder.builder().terminal(terminal).build();
+            
+            final Terminal term = terminal;
+            // Custom Paste Widget for Ctrl+V
+            final LineReader lr = lineReader;
+            Widget pasteWidget = () -> {
+                try {
+                    // Check for headless environment
+                    if (java.awt.GraphicsEnvironment.isHeadless()) return false;
+
+                    Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
+                    if (c == null) return false;
+
+                    if (c.isDataFlavorAvailable(DataFlavor.imageFlavor)) {
+                        BufferedImage img = (BufferedImage) c.getData(DataFlavor.imageFlavor);
+                        String tempDir = System.getProperty("java.io.tmpdir");
+                        String fileName = "pasted_image_" + System.currentTimeMillis() + ".png";
+                        File outputFile = new File(tempDir, fileName);
+                        ImageIO.write(img, "png", outputFile);
+                        
+                        String pathStr = outputFile.getAbsolutePath();
+                        // Insert quoted path with a space for separation
+                        lr.getBuffer().write("\"" + pathStr + "\" "); 
+                        
+                        // Notify user visibly
+                        term.writer().println("\n" + ANSI_BLUE + "[System] Image pasted and saved to: " + pathStr + ANSI_RESET);
+                        term.writer().println(ANSI_BLUE + "[System] This image path has been added to your prompt." + ANSI_RESET);
+                        term.flush();
+                        
+                        // Redraw line to show the inserted path
+                        lr.callWidget(LineReader.REDRAW_LINE);
+                        lr.callWidget(LineReader.REDISPLAY);
+                        return true;
+                    } else if (c.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                        String text = (String) c.getData(DataFlavor.stringFlavor);
+                        if (text != null) {
+                            lr.getBuffer().write(text);
+                        }
+                        return true;
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error in paste widget: " + e.getMessage());
+                    e.printStackTrace();
+                }
+                return false;
+            };
+            
+            // Register and bind
+            lineReader.getWidgets().put("paste-custom", pasteWidget);
+            lineReader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("paste-custom"), KeyMap.ctrl('v'));
+
         } catch (IOException e) {
             System.err.println("Error initializing JLine terminal: " + e.getMessage());
             System.exit(1);
@@ -384,10 +519,10 @@ public class MkPro {
         final Terminal fTerminal = terminal;
         final LineReader fLineReader = lineReader;
 
-        if (verbose) {
-            System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
-        }
+        if (verbose) System.out.println(ANSI_BLUE + "mkpro ready! Type 'exit' to quit." + ANSI_RESET);
         System.out.println(ANSI_BLUE + "Type '/help' for a list of commands. Press [ESC] to interrupt agent." + ANSI_RESET);
+
+        StringBuilder pendingInputBuffer = new StringBuilder();
 
         while (true) {
             String line = null;
@@ -414,6 +549,7 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /runner     - Change the execution runner." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /team       - Switch agent team definition." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /server     - Manage Ollama servers." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /models     - List available models." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change Coordinator model." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /status     - Show current configuration." + ANSI_RESET);
@@ -421,6 +557,7 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /init       - Initialize project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /re-init    - Re-initialize project memory." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /remember   - Analyze and save summary." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /export logs- Export all action logs to Markdown." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /reset      - Reset the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /compact    - Compact the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /summarize  - Generate session summary." + ANSI_RESET);
@@ -456,11 +593,36 @@ public class MkPro {
                             String newTeamName = teamFiles.get(idx).getName().replaceFirst("[.][^.]+$", "");
                             currentTeam.set(newTeamName);
                             saveTeamSelection(newTeamName);
-                            fTerminal.writer().println(ANSI_BLUE + "Switched to team: " + newTeamName + ". Rebuilding runner..." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Switched to team: " + newTeamName + ". Reloading configs and rebuilding runner..." + ANSI_RESET);
                             
+                            // Reload configs for the new team
+                            try {
+                                Map<String, String> newConfigs = centralMemory.getAgentConfigs(currentProjectPath, newTeamName);
+                                // Reset to defaults first? Or keep current as baseline?
+                                // Better to reset to defaults + new overrides to avoid leakage from previous team
+                                agentConfigs.replaceAll((k, v) -> new AgentConfig(initialProvider, initialModelName));
+                                
+                                for (Map.Entry<String, String> entry : newConfigs.entrySet()) {
+                                    String agent = entry.getKey();
+                                    String val = entry.getValue();
+                                    if (val != null && val.contains("|")) {
+                                        String[] parts = val.split("\\|", 2);
+                                        try {
+                                            Provider p = Provider.valueOf(parts[0]);
+                                            String m = parts[1];
+                                            agentConfigs.put(agent, new AgentConfig(p, m));
+                                        } catch (IllegalArgumentException e) {
+                                            // Ignore invalid
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                fTerminal.writer().println(ANSI_BLUE + "Warning: Failed to load specific configs for team " + newTeamName + ANSI_RESET);
+                            }
+
                             // Rebuild runner
                             runner = runnerFactory.apply(currentRunnerType.get());
-                            fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new team definitions." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new team definitions and configs." + ANSI_RESET);
                         } else {
                             fTerminal.writer().println(ANSI_BLUE + "Invalid selection." + ANSI_RESET);
                         }
@@ -524,14 +686,14 @@ public class MkPro {
                         System.out.println(ANSI_BLUE + "No statistics available yet." + ANSI_RESET);
                     } else {
                         System.out.println(ANSI_BLUE + "Agent Statistics:" + ANSI_RESET);
-                        System.out.println(ANSI_BLUE + String.format("% -15s | % -10s | % -25s | % -8s | % -8s | % -8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
+                        System.out.println(ANSI_BLUE + String.format("%-15s | %-10s | %-25s | %-8s | %-8s | %-8s", "Agent", "Provider", "Model", "Duration", "Success", "In/Out") + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
                         int start = Math.max(0, stats.size() - 20);
                         for (int i = start; i < stats.size(); i++) {
                             AgentStat s = stats.get(i);
                             String modelShort = s.getModel();
                             if (modelShort.length() > 25) modelShort = modelShort.substring(0, 22) + "...";
-                            System.out.println(ANSI_BRIGHT_GREEN + String.format("% -15s | % -10s | % -25s | % -8dms | % -8s | %d/%d", s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
+                            System.out.println(ANSI_BRIGHT_GREEN + String.format("%-15s | %-10s | %-25s | %-8dms | %-8s | %d/%d", s.getAgentName(), s.getProvider(), modelShort, s.getDurationMs(), s.isSuccess(), s.getInputLength(), s.getOutputLength()) + ANSI_RESET);
                         }
                         System.out.println(ANSI_BLUE + "-".repeat(95) + ANSI_RESET);
                         System.out.println(ANSI_BLUE + "Total Invocations: " + stats.size() + ANSI_RESET);
@@ -545,6 +707,7 @@ public class MkPro {
             if ("/status".equalsIgnoreCase(line)) {
                 System.out.println(ANSI_BLUE + "Runner Type : " + ANSI_BRIGHT_GREEN + currentRunnerType.get() + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "Team Config : " + ANSI_BRIGHT_GREEN + currentTeam.get() + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "Ollama Server: " + ANSI_BRIGHT_GREEN + centralMemory.getSelectedOllamaServer() + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "| Agent        | Provider   | Model                                    |" + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
@@ -553,7 +716,7 @@ public class MkPro {
                 Collections.sort(sortedNames);
                 for (String name : sortedNames) {
                     AgentConfig ac = agentConfigs.get(name);
-                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "% -40s " + ANSI_BLUE + "|%n" + ANSI_RESET, name, ac.getProvider(), ac.getModelName());
+                    System.out.printf(ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-12s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-10s " + ANSI_BLUE + "| " + ANSI_BRIGHT_GREEN + "%-40s " + ANSI_BLUE + "|%n" + ANSI_RESET, name, ac.getProvider(), ac.getModelName());
                 }
                 System.out.println(ANSI_BLUE + "+--------------+------------+------------------------------------------+" + ANSI_RESET);
                 
@@ -567,6 +730,66 @@ public class MkPro {
                     System.out.println(ANSI_BRIGHT_GREEN + "  Stored Projects  : " + memories.size() + ANSI_RESET);
                 } catch (Exception e) {
                     System.out.println(ANSI_BRIGHT_GREEN + "  Central Store    : [Error accessing DB] " + e.getMessage() + ANSI_RESET);
+                }
+                continue;
+            }
+
+            if (line.toLowerCase().startsWith("/server")) {
+                String[] parts = line.trim().split("\\s+");
+                List<String> servers = centralMemory.getOllamaServers();
+                String selected = centralMemory.getSelectedOllamaServer();
+
+                if (parts.length == 1) {
+                    fTerminal.writer().println(ANSI_BLUE + "Ollama Servers:" + ANSI_RESET);
+                    for (int i = 0; i < servers.size(); i++) {
+                        String s = servers.get(i);
+                        String marker = s.equals(selected) ? " *" : "";
+                        fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d] %s%s%n" + ANSI_RESET, i + 1, s, marker);
+                    }
+                    fTerminal.writer().println(ANSI_BLUE + "Usage: /server add <url>, /server select <index>, /server remove <index>" + ANSI_RESET);
+                } else if (parts.length >= 2) {
+                    String sub = parts[1];
+                    if ("add".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        String url = parts[2];
+                        if (!servers.contains(url)) {
+                            servers.add(url);
+                            centralMemory.saveOllamaServers(servers);
+                            fTerminal.writer().println(ANSI_BLUE + "Added server: " + url + ANSI_RESET);
+                        } else {
+                            fTerminal.writer().println(ANSI_BLUE + "Server already exists." + ANSI_RESET);
+                        }
+                    } else if ("select".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < servers.size()) {
+                                centralMemory.saveSelectedOllamaServer(servers.get(idx));
+                                fTerminal.writer().println(ANSI_BLUE + "Selected server: " + servers.get(idx) + ANSI_RESET);
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index format." + ANSI_RESET);
+                        }
+                    } else if ("remove".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < servers.size()) {
+                                String removed = servers.remove(idx);
+                                centralMemory.saveOllamaServers(servers);
+                                fTerminal.writer().println(ANSI_BLUE + "Removed server: " + removed + ANSI_RESET);
+                                if (removed.equals(selected) && !servers.isEmpty()) {
+                                    centralMemory.saveSelectedOllamaServer(servers.get(0));
+                                    fTerminal.writer().println(ANSI_BLUE + "Selected default: " + servers.get(0) + ANSI_RESET);
+                                }
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index format." + ANSI_RESET);
+                        }
+                    } else {
+                        fTerminal.writer().println(ANSI_BLUE + "Unknown subcommand. Usage: /server add <url>, /server select <index>, /server remove <index>" + ANSI_RESET);
+                    }
                 }
                 continue;
             }
@@ -641,9 +864,13 @@ public class MkPro {
                     } else if (selectedProvider == Provider.OLLAMA) {
                         fTerminal.writer().println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
                         try {
+                            String baseUrl = centralMemory.getSelectedOllamaServer();
+                            // Ensure no trailing slash for clean concatenation, though URI.create handles some
+                            if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                            
                             HttpClient client = HttpClient.newHttpClient();
                             HttpRequest request = HttpRequest.newBuilder()
-                                    .uri(URI.create("http://localhost:11434/api/tags"))
+                                    .uri(URI.create(baseUrl + "/api/tags"))
                                     .timeout(Duration.ofSeconds(5))
                                     .GET()
                                     .build();
@@ -692,14 +919,14 @@ public class MkPro {
                     if (configureAllAgents) {
                         for (String agentName : agentConfigs.keySet()) {
                             agentConfigs.put(agentName, new AgentConfig(selectedProvider, selectedModel));
-                            centralMemory.saveAgentConfig(agentName, selectedProvider.name(), selectedModel);
+                            centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), agentName, selectedProvider.name(), selectedModel);
                         }
                         fTerminal.writer().println(ANSI_BLUE + "Updated all agents to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         runner = runnerFactory.apply(currentRunnerType.get());
                         fTerminal.writer().println(ANSI_BLUE + "Runner rebuilt with new configurations." + ANSI_RESET);
                     } else {
                         agentConfigs.put(selectedAgent, new AgentConfig(selectedProvider, selectedModel));
-                        centralMemory.saveAgentConfig(selectedAgent, selectedProvider.name(), selectedModel);
+                        centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), selectedAgent, selectedProvider.name(), selectedModel);
                         fTerminal.writer().println(ANSI_BLUE + "Updated " + selectedAgent + " to [" + selectedProvider + "] " + selectedModel + ANSI_RESET);
                         
                         if ("Coordinator".equalsIgnoreCase(selectedAgent)) {
@@ -727,7 +954,7 @@ public class MkPro {
                             }
 
                             agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
-                            centralMemory.saveAgentConfig(agentName, newProvider.name(), newModel);
+                            centralMemory.saveAgentConfig(currentProjectPath, currentTeam.get(), agentName, newProvider.name(), newModel);
                             fTerminal.writer().println(ANSI_BLUE + "Updated " + agentName + " to [" + newProvider + "] " + newModel + ANSI_RESET);
                             
                             if ("Coordinator".equalsIgnoreCase(agentName)) {
@@ -743,7 +970,50 @@ public class MkPro {
                 continue;
             }
 
-            if ("/reset".equalsIgnoreCase(line)) {
+            if ("/index".equalsIgnoreCase(line)) {
+                IndexingHelper.indexCodebase(vectorStore, embeddingService);
+                continue;
+            }
+
+            if ("/export logs".equalsIgnoreCase(line)) {
+                try {
+                    System.out.println(ANSI_BLUE + "Exporting action logs to markdown..." + ANSI_RESET);
+                    List<String> logs = logger.getLogs();
+                    StringBuilder md = new StringBuilder();
+                    md.append("# Action Logs Report\n\n");
+                    md.append("Generated on: ").append(java.time.LocalDateTime.now()).append("\n\n");
+                    
+                    for (String log : logs) {
+                        // Log format: [timestamp] ROLE: content
+                        // Let's try to parse it for better formatting
+                        int roleStart = log.indexOf("] ") + 2;
+                        int contentStart = log.indexOf(": ", roleStart);
+                        
+                        if (roleStart > 1 && contentStart > roleStart) {
+                            String timestamp = log.substring(1, roleStart - 2);
+                            String role = log.substring(roleStart, contentStart);
+                            String content = log.substring(contentStart + 2);
+                            
+                            md.append("### ").append(role).append(" - ").append(timestamp).append("\n\n");
+                            md.append(content).append("\n\n");
+                            md.append("---\n\n");
+                        } else {
+                            // Fallback
+                            md.append(log).append("\n\n");
+                        }
+                    }
+                    
+                    Path reportPath = Paths.get("action_logs_report.md");
+                    Files.writeString(reportPath, md.toString());
+                    System.out.println(ANSI_BRIGHT_GREEN + "Successfully exported logs to: " + reportPath.toAbsolutePath() + ANSI_RESET);
+                } catch (Exception e) {
+                    System.err.println(ANSI_BLUE + "Error exporting logs: " + e.getMessage() + ANSI_RESET);
+                }
+                continue;
+            }
+
+            if ("/init".equalsIgnoreCase(line)) {
+
                 currentSession = runner.sessionService().createSession("mkpro", "Coordinator").blockingGet();
                 saveSessionId(currentSession.id());
                 System.out.println(ANSI_BLUE + "System: Session reset. New session ID: " + currentSession.id() + ANSI_RESET);
@@ -785,9 +1055,10 @@ public class MkPro {
             java.util.List<Part> parts = new java.util.ArrayList<>();
             parts.add(Part.fromText(line));
 
-            // Image detection logic
-            String[] tokens = line.split("\\s+");
-            for (String token : tokens) {
+            // Image detection logic with quote handling
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("([^\"]\\S*|\".+?\")\\s*").matcher(line);
+            while (m.find()) {
+                String token = m.group(1).replace("\"", ""); // Remove quotes
                 String lowerToken = token.toLowerCase();
                 if (lowerToken.endsWith(".jpg") || lowerToken.endsWith(".jpeg") || lowerToken.endsWith(".png") || lowerToken.endsWith(".webp")) {
                     try {
@@ -847,44 +1118,52 @@ public class MkPro {
                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE);
                                                                     fTerminal.writer().flush();
                                                                     
-                                                                    // Spinner chars
-                                                                    String[] syms = {"|", "/", "-", "\\"};
-                                                                    int spinnerIdx = 0;
-                                                                    long lastSpinnerUpdate = 0;
-                                                    
-                                                                    while (isThinking.get()) {
-                                                                        // Non-blocking read with timeout
-                                                                        int c = fTerminal.reader().read(10); 
-                                                                        if (c == 27) { // ESC
-                                                                            isCancelled.set(true);
-                                                                            agentSubscription.dispose();
-                                                                            isThinking.set(false);
-                                                                            fTerminal.writer().print(ANSI_RESET);
-                                                                            fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
-                                                                            fTerminal.writer().flush();
-                                                                            logger.log("SYSTEM", "User interrupted the agent.");
-                                                                            break;
-                                                                        }
-                                                                        
-                                                                        // Update spinner only if no response has started streaming yet
-                                                                        if (responseBuilder.length() == 0) {
-                                                                            long now = System.currentTimeMillis();
-                                                                            if (now - lastSpinnerUpdate > 100) {
-                                                                                fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
-                                                                                fTerminal.writer().flush();
-                                                                                lastSpinnerUpdate = now;
-                                                                            }
-                                                                        } else {
-                                                                            // Once response starts, ensure we cleared the spinner line once
-                                                                            if (spinnerIdx != -1) {
-                                                                                 fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
-                                                                                 fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
-                                                                                 fTerminal.writer().flush();
-                                                                                 spinnerIdx = -1; // Flag that we are done spinning
-                                                                            }
-                                                                        }
-                                                                    }
-                        
+                                                                                                        // Spinner chars
+                                                                                                        String[] syms = {"|", "/", "-", "\\"};
+                                                                                                        int spinnerIdx = 0;
+                                                                                                        long lastSpinnerUpdate = 0;
+                                                                                        
+                                                                                                        while (isThinking.get()) {
+                                                                                                            // Poll for input with timeout to listen for user actions while agent works
+                                                                                                            int c = fTerminal.reader().read(10); 
+                                                                                                            
+                                                                                                            if (c == 27) { // ESC -> Cancel
+                                                                                                                isCancelled.set(true);
+                                                                                                                if (agentSubscription != null) agentSubscription.dispose();
+                                                                                                                isThinking.set(false);
+                                                                                                                fTerminal.writer().print(ANSI_RESET);
+                                                                                                                fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
+                                                                                                                fTerminal.writer().flush();
+                                                                                                                logger.log("SYSTEM", "User interrupted the agent.");
+                                                                                                                break;
+                                                                                                            } else if (c == 22) { // Ctrl+V -> Paste in background
+                                                                                                                String pasted = handleClipboardPaste(fTerminal);
+                                                                                                                if (pasted != null) {
+                                                                                                                    pendingInputBuffer.append(pasted);
+                                                                                                                }
+                                                                                                            } else if (c > 0) {
+                                                                                                                // Buffer type-ahead characters
+                                                                                                                pendingInputBuffer.append((char)c);
+                                                                                                            }
+                                                                                                            
+                                                                                                            // Update spinner only if no response has started streaming yet
+                                                                                                            if (responseBuilder.length() == 0) {
+                                                                                                                long now = System.currentTimeMillis();
+                                                                                                                if (now - lastSpinnerUpdate > 100) {
+                                                                                                                    fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
+                                                                                                                    fTerminal.writer().flush();
+                                                                                                                    lastSpinnerUpdate = now;
+                                                                                                                }
+                                                                                                            } else {
+                                                                                                                // Once response starts, ensure we cleared the spinner line once
+                                                                                                                if (spinnerIdx != -1) {
+                                                                                                                     fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
+                                                                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
+                                                                                                                     fTerminal.writer().flush();
+                                                                                                                     spinnerIdx = -1; // Flag that we are done spinning
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }                        
                                     } catch (Exception e) {
                                         System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
                                     }        }

@@ -25,6 +25,8 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 
 - **Goal Tracking**: Never lose track of original user requests during complex, multi-step sessions.
 - **Granular Configuration**: Assign different models to different agents. Use a cheap, fast model (e.g., `gemini-1.5-flash`) for the *Coder* and a reasoning-heavy model (e.g., `claude-3-5-sonnet`) for the *Architect*.
+- **Per-Team Configurations**: Save different model setups for different teams (e.g., a "Security" team using specialized models vs. a "Dev" team using fast models).
+- **Clipboard Integration**: Paste text or images directly into the terminal using `Ctrl+V`. Images are automatically saved and provided to agents.
 - **Persistent Memory**:
     - **Central Store**: Project summaries and agent configurations are saved to `~/.mkpro/central_memory.db`.
     - **Local Session**: Context is managed efficiently with `/compact` to save tokens.
@@ -32,6 +34,43 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 - **Multi-Runner Support**: Choose between **InMemory**, **MapDB** (persistent), and **Postgres** (enterprise) execution environments for your agents.
 - **Debug Awareness**: Agents are aware of which provider/model they are running on, helping in performance tuning and debugging.
 - **Customizable Teams**: Define your own team rosters, agent descriptions, and specialized instructions using YAML files in `~/.mkpro/teams/`.
+
+## 💎 Supported Gemini Models
+
+`mkpro` is optimized for the latest Gemini 3 and 1.5 series models. You can configure any agent to use these models via the `/config` command or team YAML files:
+
+| Model | Best For |
+| :--- | :--- |
+| **gemini-3-pro** | **Ultimate Multimodal Reasoning**. The flagship model for complex architecture, agentic workflows, and deep interactivity. Includes 'Deep Think' reasoning capabilities. |
+| **gemini-3-flash** | **Frontier Speed**. Lightning-fast intelligence for rapid iterations, testing, and system administration. |
+| **gemini-1.5-pro** | **Large Context Reasoning**. Stable option for processing massive codebases (up to 2M tokens). |
+| **gemini-1.5-flash** | **Efficiency**. Cost-effective and reliable for high-frequency sub-agent tasks. |
+
+## 🦙 Supported Ollama Models
+
+For local, privacy-first inference, `mkpro` supports a wide range of models via **Ollama**. These are ideal for running on your own hardware (e.g., Apple Silicon, NVIDIA GPUs) without sending data to the cloud.
+
+| Model | Best For | Recommended Variant |
+| :--- | :--- | :--- |
+| **DeepSeek-Coder-V2** | **Coding & Architecture**. State-of-the-art open model for code generation and understanding. | `deepseek-coder-v2` |
+| **Qwen 2.5 Coder** | **Code Repair & Polyglot**. Excellent at fixing bugs and supporting 92+ languages. | `qwen2.5-coder:32b` |
+| **Llama 3.3** | **General Reasoning**. Powerful all-rounder from Meta with strong logic capabilities. | `llama3.3` |
+| **Phi-4** | **Complex Reasoning**. Microsoft's small but mighty model, optimized for deep logical tasks. | `phi4` |
+| **Mistral Large 2** | **Reasoning & Instruction**. High-performance model for complex instructions. | `mistral-large` |
+
+To use these, ensure you have pulled them in Ollama (e.g., `ollama pull deepseek-coder-v2`) and update your config.
+
+## ☁️ Supported AWS Bedrock Models
+
+`mkpro` integrates with **AWS Bedrock** to provide access to industry-leading enterprise models. Configure your AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) to use these.
+
+| Model | Best For | Model ID |
+| :--- | :--- | :--- |
+| **Claude 4.5 Opus** | **Advanced Software Engineering**. Leading model for complex, long-running coding tasks and research. | `anthropic.claude-opus-4-5-20251101-v1:0` |
+| **Claude 3.5 Sonnet (v2)** | **Balanced Performance**. Exceptional at coding, multi-step reasoning, and tool use. | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| **Amazon Nova Pro** | **Enterprise Reasoning**. Powerful multimodal model for software development and mathematical analysis. | `amazon.nova-pro-v1:0` |
+| **Amazon Nova 2 Lite** | **Speed & Economy**. Cost-effective reasoning with a massive 1M token context window. | `amazon.nova-2-lite-v1:0` |
+| **Mistral Large 3** | **Multimodal Workloads**. High-precision model optimized for math and coding benchmarks. | `mistral.mistral-large-2411-v1:0` |
 
 ## 🛠️ Setup & Installation
 
@@ -65,6 +104,11 @@ This generates the native Windows executable `target/mkpro.exe` and a fat JAR.
 
 ### Switching Teams:
 Use the `/team` command in the console to list and select available team rosters. This will automatically rebuild the agent runner with the new instructions and roles.
+
+### Per-Team Model Configurations
+Model assignments (e.g., Coder uses Gemini 1.5 Pro) are now saved **per team**.
+- When you switch teams via `/team`, the assistant automatically reloads the specific model configuration you last set for that team.
+- This allows you to have a "Low Cost" team using Flash models and a "High Performance" team using Pro/Opus models, and switch between them instantly.
 
 ## 🌍 Installation & System-Wide Setup
 
@@ -100,6 +144,23 @@ Select Agent to configure:
   [2] Coder (Current: GEMINI - gemini-1.5-pro)
   ...
 ```
+
+### Clipboard & Images
+`mkpro` supports seamless clipboard integration for a smoother workflow.
+- **Paste Text**: Press `Ctrl+V` to paste text from your clipboard directly into the prompt.
+- **Paste Images**: If you have an image in your clipboard (e.g., a screenshot), pressing `Ctrl+V` will:
+    1.  Automatically save the image to a temporary file.
+    2.  Insert the file path into your prompt.
+    3.  Notify the agent that an image is available for analysis.
+    This is perfect for showing the **Coder** or **Tester** UI bugs, diagrams, or error screenshots.
+
+### Codebase Indexing & Search
+Enable agents to semantically understand your entire codebase, not just files they explicitly read.
+1.  **Index Codebase**: Run `/index` in the project root. This recursively scans, chunks, and embeds your code into a local vector database (`~/.mkpro/vectors/<project>.db`).
+2.  **Semantic Search**: Once indexed, agents (like **Architect** and **Coder**) gain a new tool `search_codebase`. They can use this to find relevant code snippets by meaning (e.g., "Find the authentication logic" or "Where is the user validation?").
+3.  **Multi-Project Search**: A powerful tool `search_multi_project` allows searching across **all** indexed projects in your `~/.mkpro/vectors/` directory. This is ideal for finding shared libraries, common patterns, or security flaws across your entire local ecosystem.
+4.  **Access Control**: For security and focus, `search_multi_project` is exclusively available to the **Coordinator**, **Architect**, and **SecurityAuditor** agents.
+5.  **Zero-Setup**: Uses an embedded `ZeroEmbeddingService` (768 dimensions), so no external API keys are needed for embeddings.
 
 ### Real-World Use Cases
 
@@ -139,12 +200,14 @@ Select Agent to configure:
 | `/stats` | **Performance**. Show agent usage statistics (latencies, token length, models). |
 | `/runner` | **Switch Runner**. Choose between InMemory, MapDB, or Postgres. |
 | `/team` | **Switch Team**. Select a different agent roster from `~/.mkpro/teams/`. |
-| `/config` | **Configure Team**. Interactive menu to set agent models/providers. Settings are saved. |
+| `/config` | **Configure Team**. Interactive menu to set agent models/providers. Settings are saved per-team. |
 | `/init` | **Learn Project**. Agents scan and memorize the project structure. |
 | `/re-init` | **Refresh Memory**. Re-scan the project if structure changed significantly. |
 | `/summarize` | Generate and save a session summary to `session_summary.txt`. |
 | `/provider` | Quick switch for the **Coordinator's** provider. |
-| `/model` | Quick switch for the **Coordinator's** model. |
+| `/server` | **Manage Ollama Servers**. Add/Select/Remove custom Ollama endpoints. |
+| `/index` | **Index Codebase**. Scans and embeds current project files for semantic search. |
+| `/models` | **List Models**. List available models for the selected provider. |
 | `/compact` | **Save Tokens**. Summarize history and start fresh. |
 | `/reset` | Clear session memory. |
 | `exit` | Quit. |
