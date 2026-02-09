@@ -432,6 +432,10 @@ public class MkPro {
         };
 
         Runner runner = runnerFactory.apply(currentRunnerType.get());
+        java.util.concurrent.atomic.AtomicBoolean makerEnabled = new java.util.concurrent.atomic.AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicReference<String> injectedInput = new java.util.concurrent.atomic.AtomicReference<>(null);
+        java.util.concurrent.atomic.AtomicInteger autoReplyCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        final int MAX_AUTO_REPLIES = 3;
         
         // Session Management
         Session currentSession = null;
@@ -525,15 +529,21 @@ public class MkPro {
         StringBuilder pendingInputBuffer = new StringBuilder();
 
         while (true) {
-            String line = null;
-            try {
-                // ANSI colors in prompt: \u001b[34m> \u001b[33m
-                line = fLineReader.readLine(ANSI_BLUE + "> " + ANSI_YELLOW); 
-                System.out.print(ANSI_RESET); // Reset after input
-            } catch (UserInterruptException e) {
-                continue; 
-            } catch (EndOfFileException e) {
-                break;
+            String line = injectedInput.getAndSet(null);
+
+            if (line != null) {
+                 System.out.println(ANSI_BLUE + "\n[Maker] Auto-replying... (Cycle " + autoReplyCount.get() + "/" + MAX_AUTO_REPLIES + ")" + ANSI_RESET);
+            } else {
+                autoReplyCount.set(0);
+                try {
+                    // ANSI colors in prompt: \u001b[34m> \u001b[33m
+                    line = fLineReader.readLine(ANSI_BLUE + "> " + ANSI_YELLOW); 
+                    System.out.print(ANSI_RESET); // Reset after input
+                } catch (UserInterruptException e) {
+                    continue; 
+                } catch (EndOfFileException e) {
+                    break;
+                }
             }
 
             if (line == null) break;
@@ -562,6 +572,12 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /compact    - Compact the session." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /summarize  - Generate session summary." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  exit        - Quit." + ANSI_RESET);
+                continue;
+            }
+            if ("/maker".equalsIgnoreCase(line)) {
+                boolean newState = !makerEnabled.get();
+                makerEnabled.set(newState);
+                System.out.println(ANSI_BLUE + "Maker functionality is now " + (newState ? "ENABLED" : "DISABLED") + ANSI_RESET);
                 continue;
             }
             
@@ -1107,6 +1123,19 @@ public class MkPro {
                                                                                 logger.log("ERROR", error.getMessage());
                                                                             },
                                                                             () -> {
+                                                                                if (makerEnabled.get() && Maker.areGoalsPending(centralMemory, currentProjectPath)) {
+                                                                                    if (autoReplyCount.get() < MAX_AUTO_REPLIES) {
+                                                                                        autoReplyCount.incrementAndGet();
+                                                                                        injectedInput.set("SYSTEM ALERT: Goals are not yet marked as COMPLETED. Please review the goals, update their status if finished, or proceed with remaining tasks.");
+                                                                                    } else {
+                                                                                        fTerminal.writer().println(ANSI_BLUE + "\n[Maker] Auto-loop paused: Goals persist as pending after " + MAX_AUTO_REPLIES + " attempts. Please review manually." + ANSI_RESET);
+                                                                                        fTerminal.writer().flush();
+                                                                                        autoReplyCount.set(0); 
+                                                                                    }
+                                                                                } else {
+                                                                                    // All goals completed, reset counter (optional, done in loop anyway)
+                                                                                }
+
                                                                                 isThinking.set(false);
                                                                                 fTerminal.writer().println(ANSI_RESET);
                                                                                 fTerminal.writer().flush();
