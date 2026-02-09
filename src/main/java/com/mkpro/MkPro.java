@@ -432,7 +432,7 @@ public class MkPro {
         };
 
         Runner runner = runnerFactory.apply(currentRunnerType.get());
-        java.util.concurrent.atomic.AtomicBoolean makerEnabled = new java.util.concurrent.atomic.AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicBoolean makerEnabled = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicReference<String> injectedInput = new java.util.concurrent.atomic.AtomicReference<>(null);
         java.util.concurrent.atomic.AtomicInteger autoReplyCount = new java.util.concurrent.atomic.AtomicInteger(0);
         final int MAX_AUTO_REPLIES = 3;
