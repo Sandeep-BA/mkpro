@@ -21,6 +21,20 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 | **DataAnalyst** | **Data Scientist**. Analyzes data sets (CSV, JSON), writes Python scripts (pandas, numpy) for statistical analysis, and generates insights. |
 | **CodeEditor** | **Code Manipulator**. Safely applies code changes to files with a built-in diff preview and user confirmation step. |
 
+## 🏗️ Architecture: The Goal-Driven Core
+
+`mkpro` is built around a rigorous goal-tracking architecture that ensures agents remain focused on the user's ultimate objective, even during long-running sessions.
+
+### The Maker Class
+The `Maker` class provides the **"heartbeat"** of this goal-driven execution. It acts as the central orchestrator that evaluates the current state of the project against the defined goal tree.
+
+### Goal Stimulus System (`getGoalStimulus`)
+To drive the agents forward, the `Maker` generates a dynamic **Goal Stimulus**. This is a context-aware report provided to the agents in every turn, derived from the `getGoalStimulus` method:
+
+*   **Prioritized Action**: It analyzes the entire goal tree and prioritizes items based on their status: **FAILED** > **IN_PROGRESS** > **PENDING**. This ensures agents immediately address errors before continuing with the plan.
+*   **Effective Leaf Goals**: It identifies "Effective Leaf" goals—these are actionable tasks that either have no sub-goals or whose sub-goals are all completed. By presenting only these leaves, the system ensures agents focus on granular, actionable tasks rather than being overwhelmed by high-level milestones.
+*   **Context Optimization**: To preserve token space, it intelligently summarizes the goal tree, showing active priorities while keeping the "Pending" list concise.
+
 ## 🚀 Key Features
 
 - **Goal Tracking**: Never lose track of original user requests during complex, multi-step sessions.
@@ -148,113 +162,16 @@ Select Agent to configure:
 ### Clipboard & Images
 `mkpro` supports seamless clipboard integration for a smoother workflow.
 - **Paste Text**: Press `Ctrl+V` to paste text from your clipboard directly into the prompt.
-- **Paste Images**: If you have an image in your clipboard (e.g., a screenshot), pressing `Ctrl+V` will:
-    1.  Automatically save the image to a temporary file.
-    2.  Insert the file path into your prompt.
-    3.  Notify the agent that an image is available for analysis.
-    This is perfect for showing the **Coder** or **Tester** UI bugs, diagrams, or error screenshots.
+- **Paste Images**: Press `Ctrl+V` to paste an image. The system will save it locally and provide the path to the agents, enabling multimodal analysis.
 
-### Codebase Indexing & Search
-Enable agents to semantically understand your entire codebase, not just files they explicitly read.
-1.  **Index Codebase**: Run `/index` in the project root. This recursively scans, chunks, and embeds your code into a local vector database (`~/.mkpro/vectors/<project>.db`).
-2.  **Semantic Search**: Once indexed, agents (like **Architect** and **Coder**) gain a new tool `search_codebase`. They can use this to find relevant code snippets by meaning (e.g., "Find the authentication logic" or "Where is the user validation?").
-3.  **Multi-Project Search**: A powerful tool `search_multi_project` allows searching across **all** indexed projects in your `~/.mkpro/vectors/` directory. This is ideal for finding shared libraries, common patterns, or security flaws across your entire local ecosystem.
-4.  **Access Control**: For security and focus, `search_multi_project` is exclusively available to the **Coordinator**, **Architect**, and **SecurityAuditor** agents.
-5.  **Zero-Setup**: Uses an embedded `ZeroEmbeddingService` (768 dimensions), so no external API keys are needed for embeddings.
+### Persistence
+The system uses **MapDB** and **Postgres** (if configured) to persist:
+- Goal trees and progress.
+- Agent configurations per team.
+- Project indexing data.
 
-### Real-World Use Cases
+## 🤝 Contributing
+Contributions are welcome! Please ensure you follow the coding standards and include tests for new features.
 
-#### 1. Full Feature Implementation
-> **User**: "Implement a new user login endpoint with JWT authentication."
->
-> **Coordinator**:
-> 1.  Asks **GoalTracker** to create a progress tracker and break down the tasks.
-> 2.  Asks **Architect** to design the API interface and security capability.
-> 3.  Asks **Coder** to write the Controller, Service, and JWT utility classes.
-> 4.  Asks **Tester** to generate JUnit tests for the new endpoint.
-> 5.  Asks **GoalTracker** to update progress after each success.
-
-#### 2. Security Hardening
-> **User**: "Audit the project for security vulnerabilities."
->
-> **Coordinator**:
-> 1.  Delegates to **SecurityAuditor** to scan `pom.xml`/`package.json` and source code.
-> 2.  **SecurityAuditor** identifies a hardcoded secret or vulnerable lib.
-> 3.  **Coordinator** asks **Coder** to apply the fix.
-> 4.  **Coordinator** asks **Tester** to verify nothing broke.
-
-#### 3. Cloud Migration
-> **User**: "Containerize this application for deployment to AWS."
->
-> **Coordinator**:
-> 1.  Delegates to **DevOps** to write a `Dockerfile` and `docker-compose.yml`.
-> 2.  **DevOps** creates AWS ECS task definitions.
-> 3.  **SysAdmin** builds the docker image locally to verify it builds.
-
-## ⌨️ Command Reference
-
-| Command | Description |
-| :--- | :--- |
-| `/help` | Show this list. |
-| `/status` | **Dashboard**. View agent models, providers, and memory stats. |
-| `/stats` | **Performance**. Show agent usage statistics (latencies, token length, models). |
-| `/runner` | **Switch Runner**. Choose between InMemory, MapDB, or Postgres. |
-| `/team` | **Switch Team**. Select a different agent roster from `~/.mkpro/teams/`. |
-| `/config` | **Configure Team**. Interactive menu to set agent models/providers. Settings are saved per-team. |
-| `/init` | **Learn Project**. Agents scan and memorize the project structure. |
-| `/re-init` | **Refresh Memory**. Re-scan the project if structure changed significantly. |
-| `/summarize` | Generate and save a session summary to `session_summary.txt`. |
-| `/provider` | Quick switch for the **Coordinator's** provider. |
-| `/server` | **Manage Ollama Servers**. Add/Select/Remove custom Ollama endpoints. |
-| `/index` | **Index Codebase**. Scans and embeds current project files for semantic search. |
-| `/models` | **List Models**. List available models for the selected provider. |
-| `/compact` | **Save Tokens**. Summarize history and start fresh. |
-| `/reset` | Clear session memory. |
-| `exit` | Quit. |
-
-## 🏗️ Architecture
-
-The project is modularized for maintainability:
-- `com.mkpro.MkPro`: Main entry point and CLI loop.
-- `com.mkpro.agents.AgentManager`: Logic for creating and delegating to sub-agents.
-- `com.mkpro.tools.MkProTools`: Factory for all tool implementations (File I/O, Shell, Web).
-- `com.mkpro.models`: Data classes for configuration and persistence.
-
-### 🧠 How Agents Share Memory
-
-`mkpro` uses a **hub-and-spoke** memory architecture to ensure agents remain focused while still being able to collaborate:
-
-1.  **Coordinator as the Hub**: Sub-agents (like Coder or SysAdmin) are technically "amnesic" for security and focus. They operate in isolated, short-lived sessions. The **Coordinator** is responsible for providing all necessary context (from previous turns or other agents) in the instructions it sends when delegating a task.
-2.  **Central Memory (Shared Whiteboard)**: A persistent MapDB store (`central_memory.db`) acts as a long-term project memory. It stores project-wide summaries, agent configurations, and session-agnostic goals. The **GoalTracker** agent primarily manages this space.
-3.  **Action Logs (Audit Trail)**: Every user interaction and agent action is recorded in `mkpro_logs.db`. The **Coordinator** has a specialized tool (`get_action_logs`) to read these logs, allowing it to "recall" past events and decisions to inform current tasks.
-4.  **Runner Persistence**: When using `MAP_DB` or `POSTGRES` runners, the individual conversation history for each agent is persisted, allowing them to maintain context across a long-running session without hitting token limits (especially when combined with `/compact`).
-
-### Agent Interaction Flow
-
-```mermaid
-graph TD
-    User([User]) -->|Inputs Prompt| MkPro[MkPro CLI/UI]
-    MkPro -->|Delegates| Coordinator[Coordinator Agent]
-    
-    subgraph "Agent Ecosystem"
-        Coordinator -->|Delegates Task| Coder[Coder]
-        Coordinator -->|Delegates Task| Tester[Tester]
-        Coordinator -->|Delegates Task| SysAdmin[SysAdmin]
-        Coordinator -->|Delegates Task| GoalTracker[GoalTracker]
-        Coordinator -.->|Manages| Others[Other Agents...]
-    end
-
-    subgraph "Execution & State"
-        Coder -->|Executes| Runner[ADK Runner]
-        Tester -->|Executes| Runner
-        Runner -->|Persists| Session[Session Memory]
-        Runner -->|Records| ActionLogger[(Action Logger)]
-        GoalTracker -->|Updates| CentralMem[(Central Memory)]
-    end
-
-    subgraph "Tools"
-        Coder -->|Uses| FileTools[File System]
-        Tester -->|Uses| Selenium[Selenium Browser]
-        SysAdmin -->|Uses| Shell[Shell Execution]
-    end
-```
+## 📄 License
+This project is licensed under the MIT License.
