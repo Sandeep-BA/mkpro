@@ -365,6 +365,10 @@ public class MkProTools {
                             if (path.getParent() != null) {
                                 Files.createDirectories(path.getParent());
                             }
+                            if (Files.exists(path)) {
+                                System.out.println(ANSI_BLUE + "Creating backup..." + ANSI_RESET);
+                                Maker.backItUp(path.toFile());
+                            }
                             Files.writeString(path, newContent, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
                             return Collections.singletonMap("status", "File written successfully (Auto-approved): " + filePath);
                         }
@@ -377,6 +381,10 @@ public class MkProTools {
                             if ("y".equalsIgnoreCase(input) || "yes".equalsIgnoreCase(input)) {
                                 if (path.getParent() != null) {
                                     Files.createDirectories(path.getParent());
+                                }
+                                if (Files.exists(path)) {
+                                    System.out.println(ANSI_BLUE + "Creating backup..." + ANSI_RESET);
+                                    Maker.backItUp(path.toFile());
                                 }
                                 Files.writeString(path, newContent, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
                                 System.out.println(ANSI_GREEN + "File written successfully." + ANSI_RESET);

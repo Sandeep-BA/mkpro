@@ -1,4 +1,9 @@
 package com.mkpro;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.nio.file.*;
+import java.security.MessageDigest;
 
 import com.mkpro.models.Goal;
 import java.util.ArrayList;
@@ -179,4 +184,49 @@ public class Maker {
             this.path = path;
         }
     }
+
+        /**
+     * Backs up the file to ~/.mkpro/backups/<MD5>/<FILENAME> and returns the MD5.
+     */
+    public static String backItUp(File file) {
+        if (file == null || !file.exists() || !file.isFile()) {
+            return null;
+        }
+
+        try {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            try (InputStream fis = new FileInputStream(file)) {
+                byte[] buffer = new byte[8192];
+                int n;
+                while ((n = fis.read(buffer)) != -1) {
+                    digest.update(buffer, 0, n);
+                }
+            }
+            
+            byte[] hashBytes = digest.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashBytes) {
+                sb.append(String.format("%02x", b));
+            }
+            String md5 = sb.toString();
+
+            String userHome = System.getProperty("user.home");
+            Path backupDir = Paths.get(userHome, ".mkpro", "backups", md5);
+            
+            if (!Files.exists(backupDir)) {
+                Files.createDirectories(backupDir);
+            }
+
+            Path backupFile = backupDir.resolve(file.getName());
+            Files.copy(file.toPath(), backupFile, StandardCopyOption.REPLACE_EXISTING);
+
+            return md5;
+
+        } catch (Exception e) {
+            System.err.println("Backup failed for " + file.getAbsolutePath() + ": " + e.getMessage());
+            return null;
+        }
+    }
+
 }
+
