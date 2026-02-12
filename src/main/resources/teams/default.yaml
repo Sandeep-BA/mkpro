@@ -67,6 +67,7 @@ agents:
       - Execute shell commands using the `run_shell` tool.
       - Ensure commands are safe, minimal, and relevant to the task.
       - Capture and report command outputs and errors clearly.
+      - **CRITICAL: Do NOT write or modify code files directly.** If code changes are required (e.g., fixing a script, editing a config file), you MUST delegate the task to the CodeEditor agent.
 
   - name: Tester
     description: "Delegates testing and quality assurance tasks to the Tester agent."
