@@ -21,6 +21,36 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 | **DataAnalyst** | **Data Scientist**. Analyzes data sets (CSV, JSON), writes Python scripts (pandas, numpy) for statistical analysis, and generates insights. |
 | **CodeEditor** | **Code Manipulator**. Safely applies code changes to files with a built-in diff preview and user confirmation step. Automatically creates backups using `Maker.backItUp`. |
 
+### Agent Interaction Flow
+
+```mermaid
+graph TD
+    User([User]) -->|Inputs Prompt| MkPro[MkPro CLI/UI]
+    MkPro -->|Delegates| Coordinator[Coordinator Agent]
+    
+    subgraph "Agent Ecosystem"
+        Coordinator -->|Delegates Task| Coder[Coder]
+        Coordinator -->|Delegates Task| Tester[Tester]
+        Coordinator -->|Delegates Task| SysAdmin[SysAdmin]
+        Coordinator -->|Delegates Task| GoalTracker[GoalTracker]
+        Coordinator -.->|Manages| Others[Other Agents...]
+    end
+
+    subgraph "Execution & State"
+        Coder -->|Executes| Runner[ADK Runner]
+        Tester -->|Executes| Runner
+        Runner -->|Persists| Session[Session Memory]
+        Runner -->|Records| ActionLogger[(Action Logger)]
+        GoalTracker -->|Updates| CentralMem[(Central Memory)]
+    end
+
+    subgraph "Tools"
+        Coder -->|Uses| FileTools[File System]
+        Tester -->|Uses| Selenium[Selenium Browser]
+        SysAdmin -->|Uses| Shell[Shell Execution]
+    end
+```
+
 ## 🏗️ Architecture: The Goal-Driven Core
 
 `mkpro` is built around a rigorous goal-tracking architecture that ensures agents remain focused on the user's ultimate objective, even during long-running sessions.
@@ -120,64 +150,4 @@ This generates the native Windows executable `target/mkpro.exe` and a fat JAR.
 1.  **Configuration Files**: Team definitions are stored in `~/.mkpro/teams/` as YAML files.
 2.  **Default Team**: The `default.yaml` includes the full roster of 12 agents (Architect, Coder, DevOps, etc.).
 3.  **Minimal Team**: Use `minimal.yaml` for lighter tasks requiring only the Coordinator and Coder.
-4.  **Customization**: You can create your own YAML file (e.g., `audit_squad.yaml`) to define specialized agents for a specific project.
-
-### Switching Teams:
-Use the `/team` command in the console to list and select available team rosters. This will automatically rebuild the agent runner with the new instructions and roles.
-
-### Per-Team Model Configurations
-Model assignments (e.g., Coder uses Gemini 1.5 Pro) are now saved **per team**.
-- When you switch teams via `/team`, the assistant automatically reloads the specific model configuration you last set for that team.
-- This allows you to have a "Low Cost" team using Flash models and a "High Performance" team using Pro/Opus models, and switch between them instantly.
-
-## 🌍 Installation & System-Wide Setup
-
-To use `mkpro` from any directory in your terminal, follow these steps:
-
-### Windows
-1.  Ensure you have built the project: `mvn package -DskipTests`.
-2.  Add the project root directory to your System PATH environment variable.
-    *   Search for "Edit the system environment variables".
-    *   Click "Environment Variables".
-    *   Under "System variables", find `Path`, select it, and click "Edit".
-    *   Click "New" and paste the full path to your `mkpro` directory (e.g., `C:\DevTools\rblab\mkpro`).
-    *   Click OK on all dialogs.
-3.  Open a **new** command prompt and type `mkpro`.
-
-### Linux / macOS
-1.  Ensure you have built the project: `mvn package -DskipTests`.
-2.  Make the script executable: `chmod +x mkpro.sh`.
-3.  Create a symlink to `/usr/local/bin` (or add to your PATH in `.bashrc`/`.zshrc`):
-    ```bash
-    sudo ln -s $(pwd)/mkpro.sh /usr/local/bin/mkpro
-    ```
-4.  Open a new terminal and type `mkpro`.
-
-## 🎮 Usage Guide
-
-### Configuration
-Use the interactive menu to set up your team:
-```text
-> /config
-Select Agent to configure:
-  [1] Architect (Current: OLLAMA - devstral-small-2)
-  [2] Coder (Current: GEMINI - gemini-1.5-pro)
-  ...
-```
-
-### Clipboard & Images
-`mkpro` supports seamless clipboard integration for a smoother workflow.
-- **Paste Text**: Press `Ctrl+V` to paste text from your clipboard directly into the prompt.
-- **Paste Images**: Press `Ctrl+V` to paste an image. The system will save it locally and provide the path to the agents, enabling multimodal analysis.
-
-### Persistence
-The system uses **MapDB** and **Postgres** (if configured) to persist:
-- Goal trees and progress.
-- Agent configurations per team.
-- Project indexing data.
-
-## 🤝 Contributing
-Contributions are welcome! Please ensure you follow the coding standards and include tests for new features.
-
-## 📄 License
-This project is licensed under the MIT License.
+4.  **Customization**: You can create your own YAML file (e.g., `audi-security.yaml`) and load it using `/team audi-security`.
