@@ -1,4 +1,7 @@
 package com.mkpro.tools;
+import java.io.File;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 import com.mkpro.Maker;
 
 import com.google.adk.tools.BaseTool;
@@ -834,7 +837,7 @@ public class MkProTools {
     public static BaseTool createRunShellTool() {
         return new BaseTool(
                 "run_shell",
-                "Executes a shell command."
+                "Executes a shell command. Supports background execution via 'background' parameter."
         ) {
             @Override
             public Optional<FunctionDeclaration> declaration() {
@@ -847,6 +850,10 @@ public class MkProTools {
                                         "command", Schema.builder()
                                                 .type("STRING")
                                                 .description("The command to execute.")
+                                                .build(),
+                                        "background", Schema.builder()
+                                                .type("BOOLEAN")
+                                                .description("If true, runs in background and returns Job ID.")
                                                 .build()
                                 ))
                                 .required(ImmutableList.of("command"))
@@ -857,12 +864,15 @@ public class MkProTools {
             @Override
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
                 String command = (String) args.get("command");
+                Boolean background = (Boolean) args.getOrDefault("background", false);
+
                 // Security Check
                 if (!Maker.isAllowed(command)) {
                     System.out.println(ANSI_RED + "[SysAdmin] BLOCKED: " + command + ANSI_RESET);
                     return Single.just(Collections.singletonMap("error", "Command blocked by security policy: " + command));
                 }
-                System.out.println(ANSI_BLUE + "[SysAdmin] Executing: " + command + ANSI_RESET);
+
+                System.out.println(ANSI_BLUE + "[SysAdmin] Executing: " + command + (Boolean.TRUE.equals(background) ? " (Background)" : "") + ANSI_RESET);
                 return Single.fromCallable(() -> {
                     try {
                         ProcessBuilder pb;
@@ -875,26 +885,45 @@ public class MkProTools {
                         
                         // Prevent hanging on interactive input
                         pb.environment().put("PYTHONUNBUFFERED", "1");
-                        pb.environment().put("CI", "true"); // Often disables interactive prompts
+                        pb.environment().put("CI", "true"); 
                         
-                        pb.redirectErrorStream(true);
-                        Process process = pb.start();
-                        
-                        // Close stdin immediately to send EOF if script tries to read input
-                        process.getOutputStream().close();
-                        
-                        String output = new String(process.getInputStream().readAllBytes());
-                        boolean exited = process.waitFor(10, TimeUnit.SECONDS);
-                        if (!exited) {
-                             process.destroy();
-                             output += "\n[Timeout - process killed]";
-                        }
-                        int exitCode = exited ? process.exitValue() : -1;
+                        if (Boolean.TRUE.equals(background)) {
+                             File logFile = File.createTempFile("job_" + System.currentTimeMillis(), ".log");
+                             pb.redirectOutput(logFile);
+                             pb.redirectError(logFile);
+                             Process process = pb.start();
+                             String jobId = ProcessManager.startJob(process, command, logFile);
+                             return ImmutableMap.of(
+                                 "result", "Job started in background.",
+                                 "job_id", jobId,
+                                 "log_file", logFile.getAbsolutePath()
+                             );
+                        } else {
+                            pb.redirectErrorStream(true);
+                            Process process = pb.start();
+                            process.getOutputStream().close();
+                            
+                            // Capture output
+                            StringBuilder output = new StringBuilder();
+                            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    output.append(line).append("\n");
+                                }
+                            }
+                            
+                            boolean exited = process.waitFor(10, TimeUnit.MINUTES);
+                            if (!exited) {
+                                 process.destroy();
+                                 output.append("\n[Timeout - process killed]");
+                            }
+                            int exitCode = exited ? process.exitValue() : -1;
 
-                        return ImmutableMap.of(
-                            "exit_code", exitCode,
-                            "output", output
-                        );
+                            return ImmutableMap.of(
+                                "exit_code", exitCode,
+                                "output", output.toString()
+                            );
+                        }
                     } catch (Exception e) {
                         return Collections.singletonMap("error", "Command failed: " + e.getMessage());
                     }

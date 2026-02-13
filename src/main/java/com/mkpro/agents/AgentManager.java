@@ -161,6 +161,8 @@ public class AgentManager {
         List<BaseTool> sysAdminTools = new ArrayList<>();
         sysAdminTools.add(MkProTools.createRunShellTool());
         sysAdminTools.add(MkProTools.createImageCropTool());
+        sysAdminTools.add(com.mkpro.tools.BackgroundJobTools.createListBackgroundJobsTool());
+        sysAdminTools.add(com.mkpro.tools.BackgroundJobTools.createKillBackgroundJobTool());
 
         List<BaseTool> testerTools = new ArrayList<>();
         testerTools.addAll(coderTools); // Read/Write/List/Image/Clipboard
