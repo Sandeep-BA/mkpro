@@ -14,6 +14,13 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.time.Duration;
 
 public class ActionLogger {
     private static DB db;
@@ -24,6 +31,16 @@ public class ActionLogger {
     private static final List<String> memoryBuffer = Collections.synchronizedList(new ArrayList<>());
     private static final int MAX_BUFFER_SIZE = 500;
     private static final String ACTION_LOG_FILE = "action_log.txt";
+
+    private static String instanceName = "unknown";
+    private static final ExecutorService shippingExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "LogShipper");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(2))
+            .build();
 
     public ActionLogger(String dbPath) {
         init(dbPath);
@@ -44,12 +61,17 @@ public class ActionLogger {
         wsServer = server;
     }
 
+    public static void setInstanceName(String name) {
+        instanceName = name;
+    }
+
     public static synchronized void logAction(String role, String content) {
         if (logs == null) return;
         String entry = String.format("[%s] %s: %s", LocalDateTime.now(), role, content);
         logs.add(entry);
         db.commit();
         broadcastLog(entry);
+        shipLog(entry);
     }
 
     public static synchronized void logAction(String action) {
@@ -70,6 +92,33 @@ public class ActionLogger {
         }
 
         broadcastLog(entry);
+        shipLog(entry);
+    }
+
+    private static void shipLog(String entry) {
+        if (!InstanceRegistry.isMaster()) {
+            InstanceRegistry.InstanceInfo master = InstanceRegistry.getMaster();
+            if (master != null) {
+                shippingExecutor.submit(() -> {
+                    try {
+                        Map<String, String> payload = new HashMap<>();
+                        payload.put("instance", instanceName);
+                        payload.put("log", entry);
+                        String json = mapper.writeValueAsString(payload);
+
+                        HttpRequest request = HttpRequest.newBuilder()
+                                .uri(URI.create("http://localhost:" + master.httpPort + "/logs/aggregate"))
+                                .header("Content-Type", "application/json")
+                                .POST(HttpRequest.BodyPublishers.ofString(json))
+                                .build();
+
+                        httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+                    } catch (Exception e) {
+                        // Fail silently
+                    }
+                });
+            }
+        }
     }
 
     public static synchronized List<String> getLogs() {
