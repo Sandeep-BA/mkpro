@@ -1,3 +1,4 @@
 target/
 .env
 mkpro_logs.db
+mkpro_logs_*.db

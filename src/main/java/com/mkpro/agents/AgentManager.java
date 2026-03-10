@@ -34,9 +34,9 @@ import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 
 import com.google.adk.memory.EmbeddingService;
-import com.google.adk.memory.VectorStore;
 
 import java.nio.file.Path;
+import com.mkpro.vectorstore.SearchableVectorStore;
 import java.nio.file.Paths;
 import java.nio.file.Files;
 import java.time.LocalDate;
@@ -50,7 +50,6 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.google.adk.memory.MapDBVectorStore;
 import com.mkpro.models.AgentDefinition;
 import com.mkpro.models.AgentsConfig;
 // ... (rest of imports)
@@ -66,7 +65,7 @@ public class AgentManager {
     private final CentralMemory centralMemory;
     private final RunnerType runnerType;
     private final Map<String, AgentDefinition> agentDefinitions;
-    private final MapDBVectorStore vectorStore;
+    private final SearchableVectorStore vectorStore;
     private final EmbeddingService embeddingService;
 
     public static final String ANSI_RESET = "\u001b[0m";
@@ -104,7 +103,7 @@ public class AgentManager {
                         CentralMemory centralMemory,
                         RunnerType runnerType,
                         Path teamFilePath,
-                        MapDBVectorStore vectorStore,
+                        SearchableVectorStore vectorStore,
                         EmbeddingService embeddingService) {
         this.sessionService = sessionService;
         this.artifactService = artifactService;

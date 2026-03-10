@@ -70,7 +70,6 @@ import io.reactivex.rxjava3.disposables.Disposable;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
-import com.google.adk.memory.MapDBVectorStore;
 
 public class MkPro {
 
@@ -233,7 +232,7 @@ public class MkPro {
         CentralMemory centralMemory = new CentralMemory();
         Session mkSession = sessionService.createSession("mkpro", "Coordinator").blockingGet();
         mkSession.state().put("MKPRO", "REDBUS");
-        ActionLogger logger = new ActionLogger("mkpro_logs.db");
+        ActionLogger logger = createActionLogger(initialRunnerType, useUI, isVerbose);
         java.util.concurrent.atomic.AtomicReference<RunnerType> currentRunnerType = new java.util.concurrent.atomic.AtomicReference<>(initialRunnerType);
 
         if (useUI) {
@@ -260,6 +259,44 @@ public class MkPro {
         }
         
         logger.close();
+    }
+
+    private static ActionLogger createActionLogger(RunnerType runnerType, boolean useUI, boolean verbose) {
+        if (runnerType == RunnerType.IN_MEMORY) {
+            return ActionLogger.inMemory();
+        }
+        String defaultPath = "mkpro_logs.db";
+        try {
+            return new ActionLogger(defaultPath);
+        } catch (Exception e) {
+            boolean isLocked = e.getMessage() != null && e.getMessage().toLowerCase().contains("locked");
+            if (!isLocked) throw e;
+
+            if (useUI) {
+                if (verbose) System.out.println(ANSI_BLUE + "mkpro_logs.db is locked. Using in-memory logger." + ANSI_RESET);
+                return ActionLogger.inMemory();
+            }
+
+            System.out.println(ANSI_BLUE + defaultPath + " is already in use by another process." + ANSI_RESET);
+            System.out.print(ANSI_BLUE + "Create a new log file? (y/n) [y]: " + ANSI_YELLOW);
+            Scanner promptScanner = new Scanner(System.in);
+            String choice = promptScanner.hasNextLine() ? promptScanner.nextLine().trim() : "";
+            System.out.print(ANSI_RESET);
+            if (choice.equalsIgnoreCase("n") || choice.equalsIgnoreCase("no")) {
+                System.out.println(ANSI_BLUE + "Using in-memory logger (logs will not persist)." + ANSI_RESET);
+                return ActionLogger.inMemory();
+            }
+
+            String newPath = "mkpro_logs_" + System.currentTimeMillis() + ".db";
+            try {
+                ActionLogger logger = new ActionLogger(newPath);
+                System.out.println(ANSI_BRIGHT_GREEN + "Using new log file: " + newPath + ANSI_RESET);
+                return logger;
+            } catch (Exception ex) {
+                System.err.println(ANSI_BLUE + "Could not create " + newPath + ": " + ex.getMessage() + ". Falling back to in-memory." + ANSI_RESET);
+                return ActionLogger.inMemory();
+            }
+        }
     }
 
     private static Path setupTeamsDir() {
@@ -399,10 +436,10 @@ public class MkPro {
             System.err.println(ANSI_BLUE + "Warning: Failed to load agent configs from central memory: " + e.getMessage() + ANSI_RESET);
         }
 
-        // Vector Store Init
+        // Vector Store Init (IN_MEMORY -> no file locks; MAP_DB/POSTGRES -> persistent, fallback to in-memory if locked)
         EmbeddingService embeddingService = IndexingHelper.createEmbeddingService();
         String projectName = Paths.get("").toAbsolutePath().getFileName().toString();
-        MapDBVectorStore vectorStore = IndexingHelper.getOrCreateStore(projectName);
+        com.mkpro.vectorstore.SearchableVectorStore vectorStore = IndexingHelper.getOrCreateStore(projectName, currentRunnerType.get());
 
         // Inject recent history from ActionLogger
         List<String> recentLogs = logger.getRecentLogs(10);

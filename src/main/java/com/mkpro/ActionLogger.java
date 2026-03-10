@@ -10,9 +10,23 @@ public class ActionLogger {
     private DB db;
     private List<String> logs;
 
+    /** File-based logger (persistent). Use when MAP_DB or POSTGRES runner is selected. */
     public ActionLogger(String dbPath) {
         db = DBMaker.fileDB(dbPath).make();
         logs = db.indexTreeList("logs", Serializer.STRING).createOrOpen();
+    }
+
+    /** In-memory logger (ephemeral). Use when IN_MEMORY runner is selected to avoid file locks. */
+    public static ActionLogger inMemory() {
+        ActionLogger logger = new ActionLogger();
+        logger.db = DBMaker.memoryDB().make();
+        logger.logs = logger.db.indexTreeList("logs", Serializer.STRING).createOrOpen();
+        return logger;
+    }
+
+    private ActionLogger() {
+        this.db = null;
+        this.logs = null;
     }
 
     public void log(String role, String content) {
@@ -43,6 +57,8 @@ public class ActionLogger {
     }
 
     public void close() {
-        db.close();
+        if (db != null) {
+            db.close();
+        }
     }
 }
