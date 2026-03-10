@@ -19,6 +19,7 @@ import com.google.adk.memory.MemoryEntry;
 
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.AgentStat;
+import com.mkpro.models.McpServer;
 import com.mkpro.models.Provider;
 import com.mkpro.models.RunnerType;
 import com.mkpro.agents.AgentManager;
@@ -29,6 +30,7 @@ import com.mkpro.SimpleWebSocketServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.File;
 import java.net.URI;
@@ -79,8 +81,10 @@ public class MkPro {
     public static final String ANSI_RESET = "\u001b[0m";
     public static final String ANSI_BRIGHT_GREEN = "\u001b[92m";
     public static final String ANSI_LIGHT_ORANGE = "\u001b[38;5;214m";
-    public static final String ANSI_YELLOW = "\u001b[33m"; // Closest to Orange
+    public static final String ANSI_YELLOW = "\u001b[33m";
     public static final String ANSI_BLUE = "\u001b[34m";
+    public static final String ANSI_GREEN = "\u001b[32m";
+    public static final String ANSI_RED = "\u001b[31m";
 
     private static final List<String> GEMINI_MODELS = Arrays.asList(
          "gemini-3-pro-preview",
@@ -218,11 +222,8 @@ public class MkPro {
             root.setLevel(Level.DEBUG);
         }
 
-        String apiKey = System.getenv("GOOGLE_API_KEY");
-        if (apiKey == null || apiKey.isEmpty()) {
-            System.err.println(ANSI_BLUE + "Error: GOOGLE_API_KEY environment variable not set." + ANSI_RESET);
-            System.exit(1);
-        }
+        String envKey = System.getenv("GOOGLE_API_KEY");
+        String apiKey = (envKey != null && !envKey.isEmpty()) ? envKey : "";
 
         // Setup Teams
         Path teamsDir = setupTeamsDir();
@@ -620,6 +621,7 @@ public class MkPro {
                 System.out.println(ANSI_BLUE + "  /team       - Switch agent team definition." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /provider   - Switch Coordinator provider." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /server     - Manage Ollama servers." + ANSI_RESET);
+                System.out.println(ANSI_BLUE + "  /mcp        - Manage MCP server connections." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /models     - List available models." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /model      - Change Coordinator model." + ANSI_RESET);
                 System.out.println(ANSI_BLUE + "  /status     - Show current configuration." + ANSI_RESET);
@@ -868,6 +870,275 @@ public class MkPro {
                         }
                     } else {
                         fTerminal.writer().println(ANSI_BLUE + "Unknown subcommand. Usage: /server add <url>, /server select <index>, /server remove <index>" + ANSI_RESET);
+                    }
+                }
+                continue;
+            }
+
+            if (line.toLowerCase().startsWith("/mcp")) {
+                String[] parts = line.trim().split("\\s+");
+                List<McpServer> mcpServers = centralMemory.getMcpServers();
+
+                if (parts.length == 1) {
+                    // Interactive /mcp menu
+                    fTerminal.writer().println("");
+                    fTerminal.writer().println(ANSI_BLUE + "╔══════════════════════════════════════════════════════╗" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "║              MCP Server Management                  ║" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BLUE + "╚══════════════════════════════════════════════════════╝" + ANSI_RESET);
+
+                    if (mcpServers.isEmpty()) {
+                        fTerminal.writer().println(ANSI_BLUE + "  No MCP servers configured." + ANSI_RESET);
+                    } else {
+                        fTerminal.writer().println(ANSI_BLUE + "  #   Status  Name          Type    URL" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  ─── ────── ──────────── ────── ──────────────────────────────" + ANSI_RESET);
+                        for (int i = 0; i < mcpServers.size(); i++) {
+                            McpServer s = mcpServers.get(i);
+                            String status = s.isEnabled() ? ANSI_GREEN + "● ON " + ANSI_RESET : ANSI_RED + "○ OFF" + ANSI_RESET;
+                            fTerminal.writer().printf("  " + ANSI_BRIGHT_GREEN + "[%d]" + ANSI_RESET + " %s " + ANSI_BRIGHT_GREEN + "%-13s %-6s %s" + ANSI_RESET + ANSI_BLUE + "  (%s)" + ANSI_RESET + "%n",
+                                i + 1, status, s.getName(), s.getType(), s.getUrl(), s.getId());
+                        }
+                    }
+                    fTerminal.writer().println("");
+                    fTerminal.writer().println(ANSI_BLUE + "  Actions:" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [A] Add new MCP server" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [T] Toggle enable/disable" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [R] Remove a server" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [C] Test connection" + ANSI_RESET);
+                    fTerminal.writer().println(ANSI_BRIGHT_GREEN + "  [Q] Back to prompt" + ANSI_RESET);
+                    fTerminal.writer().println("");
+
+                    String action = fLineReader.readLine(ANSI_BLUE + "  Select action: " + ANSI_YELLOW).trim();
+                    fTerminal.writer().print(ANSI_RESET);
+
+                    if ("A".equalsIgnoreCase(action)) {
+                        // Add new MCP server
+                        fTerminal.writer().println(ANSI_BLUE + "\n  ── Add MCP Server ──" + ANSI_RESET);
+                        String mcpName = fLineReader.readLine(ANSI_BLUE + "  Server name: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        if (mcpName.isEmpty()) { fTerminal.writer().println(ANSI_BLUE + "  Cancelled." + ANSI_RESET); continue; }
+
+                        String mcpUrl = fLineReader.readLine(ANSI_BLUE + "  Server URL (e.g. http://127.0.0.1:3845/mcp): " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        if (mcpUrl.isEmpty()) { fTerminal.writer().println(ANSI_BLUE + "  Cancelled." + ANSI_RESET); continue; }
+
+                        fTerminal.writer().println(ANSI_BLUE + "  Server type:" + ANSI_RESET);
+                        McpServer.McpType[] types = McpServer.McpType.values();
+                        for (int i = 0; i < types.length; i++) {
+                            fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "    [%d] %s%n" + ANSI_RESET, i + 1, types[i]);
+                        }
+                        String typeChoice = fLineReader.readLine(ANSI_BLUE + "  Select type [1-" + types.length + "]: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+
+                        McpServer.McpType selectedType = McpServer.McpType.CUSTOM;
+                        try {
+                            int idx = Integer.parseInt(typeChoice) - 1;
+                            if (idx >= 0 && idx < types.length) selectedType = types[idx];
+                        } catch (NumberFormatException ignored) {}
+
+                        McpServer newServer = new McpServer(mcpName, mcpUrl, selectedType);
+                        centralMemory.addMcpServer(newServer);
+                        fTerminal.writer().println(ANSI_GREEN + "\n  ✓ Added: " + newServer + ANSI_RESET);
+
+                        // Auto-detect Figma URL pattern
+                        if (mcpUrl.contains("figma") || mcpName.toLowerCase().contains("figma")) {
+                            newServer.setType(McpServer.McpType.FIGMA);
+                            centralMemory.saveMcpServers(centralMemory.getMcpServers());
+                        }
+
+                        // Test connection
+                        String testConn = fLineReader.readLine(ANSI_BLUE + "  Test connection now? (y/n): " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        if ("y".equalsIgnoreCase(testConn)) {
+                            testMcpConnection(fTerminal, mcpUrl, newServer.getId(), centralMemory);
+                        }
+
+                        runner = runnerFactory.apply(currentRunnerType.get());
+                        currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                        saveSessionId(currentSession.id());
+                        fTerminal.writer().println(ANSI_BLUE + "  Agent reconfigured with new MCP server." + ANSI_RESET);
+
+                    } else if ("T".equalsIgnoreCase(action)) {
+                        if (mcpServers.isEmpty()) {
+                            fTerminal.writer().println(ANSI_BLUE + "  No servers to toggle." + ANSI_RESET);
+                            continue;
+                        }
+                        String togSel = fLineReader.readLine(ANSI_BLUE + "  Server # to toggle: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        try {
+                            int idx = Integer.parseInt(togSel) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                McpServer s = mcpServers.get(idx);
+                                centralMemory.toggleMcpServer(s.getId());
+                                boolean newState = !s.isEnabled();
+                                fTerminal.writer().println(ANSI_GREEN + "  ✓ " + s.getName() + " is now " + (newState ? "ENABLED" : "DISABLED") + ANSI_RESET);
+                                runner = runnerFactory.apply(currentRunnerType.get());
+                                currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                saveSessionId(currentSession.id());
+                                fTerminal.writer().println(ANSI_BLUE + "  Agent reconfigured for updated MCP settings." + ANSI_RESET);
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "  Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "  Invalid input." + ANSI_RESET);
+                        }
+
+                    } else if ("R".equalsIgnoreCase(action)) {
+                        if (mcpServers.isEmpty()) {
+                            fTerminal.writer().println(ANSI_BLUE + "  No servers to remove." + ANSI_RESET);
+                            continue;
+                        }
+                        String rmSel = fLineReader.readLine(ANSI_BLUE + "  Server # to remove: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        try {
+                            int idx = Integer.parseInt(rmSel) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                McpServer s = mcpServers.get(idx);
+                                String confirm = fLineReader.readLine(ANSI_BLUE + "  Remove '" + s.getName() + "'? (y/n): " + ANSI_YELLOW).trim();
+                                fTerminal.writer().print(ANSI_RESET);
+                                if ("y".equalsIgnoreCase(confirm)) {
+                                    centralMemory.removeMcpServer(s.getId());
+                                    fTerminal.writer().println(ANSI_GREEN + "  ✓ Removed: " + s.getName() + ANSI_RESET);
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
+                                } else {
+                                    fTerminal.writer().println(ANSI_BLUE + "  Cancelled." + ANSI_RESET);
+                                }
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "  Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "  Invalid input." + ANSI_RESET);
+                        }
+
+                    } else if ("C".equalsIgnoreCase(action)) {
+                        if (mcpServers.isEmpty()) {
+                            fTerminal.writer().println(ANSI_BLUE + "  No servers to test." + ANSI_RESET);
+                            continue;
+                        }
+                        String cSel = fLineReader.readLine(ANSI_BLUE + "  Server # or name to test: " + ANSI_YELLOW).trim();
+                        fTerminal.writer().print(ANSI_RESET);
+                        McpServer testTarget = null;
+                        try {
+                            int idx = Integer.parseInt(cSel) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) testTarget = mcpServers.get(idx);
+                        } catch (NumberFormatException e) {
+                            for (McpServer s : mcpServers) {
+                                if (s.getName().equalsIgnoreCase(cSel) || s.getId().equalsIgnoreCase(cSel)) {
+                                    testTarget = s;
+                                    break;
+                                }
+                            }
+                        }
+                        if (testTarget != null) {
+                            testMcpConnection(fTerminal, testTarget.getUrl(), testTarget.getId(), centralMemory);
+                        } else {
+                            fTerminal.writer().println(ANSI_BLUE + "  Server not found. Use the # number or exact name." + ANSI_RESET);
+                        }
+                    }
+                    // Q or anything else → back to prompt
+
+                } else if (parts.length >= 2) {
+                    // Quick CLI subcommands: /mcp add <name> <url> [type]
+                    String sub = parts[1];
+                    if ("add".equalsIgnoreCase(sub) && parts.length >= 4) {
+                        String name = parts[2];
+                        String url = parts[3];
+                        McpServer.McpType type = McpServer.McpType.CUSTOM;
+                        if (parts.length >= 5) {
+                            try { type = McpServer.McpType.valueOf(parts[4].toUpperCase()); }
+                            catch (IllegalArgumentException ignored) {}
+                        }
+                        if (url.contains("figma") || name.toLowerCase().contains("figma")) type = McpServer.McpType.FIGMA;
+                        McpServer s = new McpServer(name, url, type);
+                        centralMemory.addMcpServer(s);
+                        fTerminal.writer().println(ANSI_GREEN + "✓ Added MCP: " + s + ANSI_RESET);
+                        runner = runnerFactory.apply(currentRunnerType.get());
+                        currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                        saveSessionId(currentSession.id());
+
+                    } else if ("remove".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                String removed = mcpServers.get(idx).getName();
+                                centralMemory.removeMcpServer(mcpServers.get(idx).getId());
+                                fTerminal.writer().println(ANSI_GREEN + "✓ Removed: " + removed + ANSI_RESET);
+                                runner = runnerFactory.apply(currentRunnerType.get());
+                                currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                saveSessionId(currentSession.id());
+                            } else {
+                                fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                        }
+
+                    } else if ("enable".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                McpServer s = mcpServers.get(idx);
+                                if (!s.isEnabled()) {
+                                    centralMemory.toggleMcpServer(s.getId());
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
+                                }
+                                fTerminal.writer().println(ANSI_GREEN + "✓ Enabled: " + s.getName() + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                        }
+
+                    } else if ("disable".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                McpServer s = mcpServers.get(idx);
+                                if (s.isEnabled()) {
+                                    centralMemory.toggleMcpServer(s.getId());
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
+                                }
+                                fTerminal.writer().println(ANSI_GREEN + "✓ Disabled: " + s.getName() + ANSI_RESET);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                        }
+
+                    } else if ("list".equalsIgnoreCase(sub)) {
+                        if (mcpServers.isEmpty()) {
+                            fTerminal.writer().println(ANSI_BLUE + "No MCP servers configured. Use /mcp to add one." + ANSI_RESET);
+                        } else {
+                            for (int i = 0; i < mcpServers.size(); i++) {
+                                McpServer s = mcpServers.get(i);
+                                String status = s.isEnabled() ? ANSI_GREEN + "ON " + ANSI_RESET : ANSI_RED + "OFF" + ANSI_RESET;
+                                fTerminal.writer().printf(ANSI_BRIGHT_GREEN + "  [%d]" + ANSI_RESET + " %s %s%n", i + 1, status, s);
+                            }
+                        }
+
+                    } else if ("test".equalsIgnoreCase(sub) && parts.length >= 3) {
+                        try {
+                            int idx = Integer.parseInt(parts[2]) - 1;
+                            if (idx >= 0 && idx < mcpServers.size()) {
+                                testMcpConnection(fTerminal, mcpServers.get(idx).getUrl(), mcpServers.get(idx).getId(), centralMemory);
+                            }
+                        } catch (NumberFormatException e) {
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
+                        }
+
+                    } else {
+                        fTerminal.writer().println(ANSI_BLUE + "Usage:" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp                          - Interactive MCP management" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp list                     - List all MCP servers" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp add <name> <url> [type]  - Add a server" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp remove <#>               - Remove a server" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp enable <#>               - Enable a server" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp disable <#>              - Disable a server" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  /mcp test <#>                 - Test connection" + ANSI_RESET);
+                        fTerminal.writer().println(ANSI_BLUE + "  Types: FIGMA, BROWSER, DATABASE, API, CUSTOM" + ANSI_RESET);
                     }
                 }
                 continue;
@@ -1294,59 +1565,166 @@ public class MkPro {
                                                                     // Initial color set
                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE);
                                                                     fTerminal.writer().flush();
-                                                                    
-                                                                                                        // Spinner chars
-                                                                                                        String[] syms = {"|", "/", "-", "\\"};
-                                                                                                        int spinnerIdx = 0;
-                                                                                                        long lastSpinnerUpdate = 0;
-                                                                                        
-                                                                                                        while (isThinking.get()) {
-                                                                                                            // Poll for input with timeout to listen for user actions while agent works
-                                                                                                            int c = fTerminal.reader().read(10); 
-                                                                                                            
-                                                                                                            if (c == 27) { // ESC -> Cancel
-                                                                                                                isCancelled.set(true);
-                                                                                                                if (agentSubscription != null) agentSubscription.dispose();
-                                                                                                                isThinking.set(false);
-                                                                                                                fTerminal.writer().print(ANSI_RESET);
-                                                                                                                fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
-                                                                                                                fTerminal.writer().flush();
-                                                                                                                logger.log("SYSTEM", "User interrupted the agent.");
-                                                                                                                break;
-                                                                                                            } else if (c == 22) { // Ctrl+V -> Paste in background
-                                                                                                                String pasted = handleClipboardPaste(fTerminal);
-                                                                                                                if (pasted != null) {
-                                                                                                                    pendingInputBuffer.append(pasted);
-                                                                                                                }
-                                                                                                            } else if (c > 0) {
-                                                                                                                // Buffer type-ahead characters
-                                                                                                                pendingInputBuffer.append((char)c);
-                                                                                                            }
-                                                                                                            
-                                                                                                            // Update spinner only if no response has started streaming yet
-                                                                                                            if (responseBuilder.length() == 0) {
-                                                                                                                long now = System.currentTimeMillis();
-                                                                                                                if (now - lastSpinnerUpdate > 100) {
-                                                                                                                    fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
-                                                                                                                    fTerminal.writer().flush();
-                                                                                                                    lastSpinnerUpdate = now;
-                                                                                                                }
-                                                                                                            } else {
-                                                                                                                // Once response starts, ensure we cleared the spinner line once
-                                                                                                                if (spinnerIdx != -1) {
-                                                                                                                     fTerminal.writer().print("\r" + " ".repeat(20) + "\r"); // Clear spinner
-                                                                                                                     fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString()); //Reprint buffer to be safe
-                                                                                                                     fTerminal.writer().flush();
-                                                                                                                     spinnerIdx = -1; // Flag that we are done spinning
-                                                                                                                }
-                                                                                                            }
-                                                                                                        }                        
+
+                                                                    // Spinner chars
+                                                                    String[] syms = {"|", "/", "-", "\\"};
+                                                                    int spinnerIdx = 0;
+                                                                    long lastSpinnerUpdate = 0;
+
+                                                                    // Background thread for ESC key detection using /dev/tty directly (no stty changes)
+                                                                    final Disposable agentSub = agentSubscription;
+                                                                    Thread escThread = new Thread(() -> {
+                                                                        try (FileInputStream ttyIn = new FileInputStream("/dev/tty")) {
+                                                                            while (isThinking.get()) {
+                                                                                if (ttyIn.available() > 0) {
+                                                                                    int c = ttyIn.read();
+                                                                                    if (c == 27) {
+                                                                                        isCancelled.set(true);
+                                                                                        if (agentSub != null) agentSub.dispose();
+                                                                                        isThinking.set(false);
+                                                                                        break;
+                                                                                    }
+                                                                                }
+                                                                                Thread.sleep(50);
+                                                                            }
+                                                                        } catch (Exception ignored) {}
+                                                                    }, "esc-listener");
+                                                                    escThread.setDaemon(true);
+                                                                    escThread.start();
+
+                                                                    while (isThinking.get()) {
+                                                                        if (isCancelled.get()) {
+                                                                            fTerminal.writer().print(ANSI_RESET);
+                                                                            fTerminal.writer().println(ANSI_BLUE + "\n[!] Interrupted by user." + ANSI_RESET);
+                                                                            fTerminal.writer().flush();
+                                                                            logger.log("SYSTEM", "User interrupted the agent.");
+                                                                            break;
+                                                                        }
+
+                                                                        // Spinner while no response has streamed yet
+                                                                        if (responseBuilder.length() == 0) {
+                                                                            long now = System.currentTimeMillis();
+                                                                            if (now - lastSpinnerUpdate > 100) {
+                                                                                fTerminal.writer().print("\r" + ANSI_BLUE + "Thinking " + syms[spinnerIdx++ % syms.length] + ANSI_RESET);
+                                                                                fTerminal.writer().flush();
+                                                                                lastSpinnerUpdate = now;
+                                                                            }
+                                                                        } else {
+                                                                            if (spinnerIdx != -1) {
+                                                                                fTerminal.writer().print("\r" + " ".repeat(20) + "\r");
+                                                                                fTerminal.writer().print(ANSI_LIGHT_ORANGE + responseBuilder.toString());
+                                                                                fTerminal.writer().flush();
+                                                                                spinnerIdx = -1;
+                                                                            }
+                                                                        }
+
+                                                                        Thread.sleep(100);
+                                                                    }
+
+                                                                    // Wait for ESC listener thread to finish and restore terminal
+                                                                    escThread.join(2000);
                                     } catch (Exception e) {
                                         System.err.println(ANSI_BLUE + "Error starting request: " + e.getMessage() + ANSI_RESET);
                                     }        }
         
         if (verbose) System.out.println(ANSI_BLUE + "Goodbye!" + ANSI_RESET);
     }
+    private static void testMcpConnection(org.jline.terminal.Terminal terminal, String url, String serverId, CentralMemory centralMemory) {
+        terminal.writer().println(ANSI_BLUE + "  Testing connection to " + url + "..." + ANSI_RESET);
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(10))
+                    .build();
+
+            // Step 1: Initialize MCP session
+            terminal.writer().println(ANSI_BLUE + "  → Sending initialize..." + ANSI_RESET);
+            String initPayload = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
+                    "\"protocolVersion\":\"2024-11-05\"," +
+                    "\"capabilities\":{}," +
+                    "\"clientInfo\":{\"name\":\"mkpro\",\"version\":\"1.5\"}" +
+                    "}}";
+
+            java.net.http.HttpRequest initReq = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .timeout(java.time.Duration.ofSeconds(15))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(initPayload))
+                    .build();
+
+            java.net.http.HttpResponse<String> initResp = client.send(initReq, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (initResp.statusCode() >= 400) {
+                terminal.writer().println(ANSI_RED + "  ✗ Initialize failed (HTTP " + initResp.statusCode() + "): " + initResp.body() + ANSI_RESET);
+                return;
+            }
+
+            String sessionId = initResp.headers().firstValue("mcp-session-id")
+                    .or(() -> initResp.headers().firstValue("Mcp-Session-Id"))
+                    .orElse(null);
+            terminal.writer().println(ANSI_GREEN + "  ✓ Initialized!" +
+                    (sessionId != null ? " (session=" + sessionId.substring(0, Math.min(8, sessionId.length())) + "...)" : "") + ANSI_RESET);
+
+            // Step 2: Send initialized notification
+            String notifPayload = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}";
+            java.net.http.HttpRequest.Builder notifBuilder = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .timeout(java.time.Duration.ofSeconds(10))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(notifPayload));
+            if (sessionId != null) notifBuilder.header("Mcp-Session-Id", sessionId);
+            client.send(notifBuilder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            // Step 3: List tools
+            terminal.writer().println(ANSI_BLUE + "  → Listing tools..." + ANSI_RESET);
+            String listPayload = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}";
+            java.net.http.HttpRequest.Builder listBuilder = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .timeout(java.time.Duration.ofSeconds(15))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(listPayload));
+            if (sessionId != null) listBuilder.header("Mcp-Session-Id", sessionId);
+
+            java.net.http.HttpResponse<String> listResp = client.send(listBuilder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (listResp.statusCode() < 400) {
+                String body = listResp.body();
+                // Handle SSE format
+                if (body.contains("data: {")) {
+                    StringBuilder jsonParts = new StringBuilder();
+                    for (String line : body.split("\n")) {
+                        line = line.trim();
+                        if (line.startsWith("data: ")) jsonParts.append(line.substring(6));
+                    }
+                    if (jsonParts.length() > 0) body = jsonParts.toString();
+                }
+
+                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                List<String> tools = new ArrayList<>();
+                while (matcher.find()) tools.add(matcher.group(1));
+
+                if (!tools.isEmpty()) {
+                    terminal.writer().println(ANSI_GREEN + "  ✓ Connected! Found " + tools.size() + " tools:" + ANSI_RESET);
+                    for (String tool : tools) {
+                        terminal.writer().println(ANSI_BRIGHT_GREEN + "    • " + tool + ANSI_RESET);
+                    }
+                } else {
+                    terminal.writer().println(ANSI_GREEN + "  ✓ Connected! (no tools parsed from response)" + ANSI_RESET);
+                }
+
+                if (serverId != null) {
+                    centralMemory.updateMcpServerConnection(serverId);
+                }
+            } else {
+                terminal.writer().println(ANSI_RED + "  ✗ Tools list failed (HTTP " + listResp.statusCode() + ")" + ANSI_RESET);
+            }
+        } catch (Exception e) {
+            terminal.writer().println(ANSI_RED + "  ✗ Connection failed: " + e.getMessage() + ANSI_RESET);
+        }
+    }
+
     private static void appendGoalRecursive(StringBuilder sb, com.mkpro.models.Goal goal, int depth) {
         String indent = "  ".repeat(depth);
         String emoji;

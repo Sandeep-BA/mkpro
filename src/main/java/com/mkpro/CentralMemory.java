@@ -250,4 +250,73 @@ public class CentralMemory {
             db.commit();
         }
     }
+
+    // ── MCP Server Registry ──────────────────────────────────────────
+
+    public void saveMcpServers(List<com.mkpro.models.McpServer> servers) {
+        try (DB db = openDB()) {
+            HTreeMap<String, ArrayList<com.mkpro.models.McpServer>> mcpMap = db.hashMap("mcp_servers")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.JAVA)
+                    .createOrOpen();
+            mcpMap.put("registry", new ArrayList<>(servers));
+            db.commit();
+        }
+    }
+
+    public List<com.mkpro.models.McpServer> getMcpServers() {
+        try (DB db = openDB()) {
+            HTreeMap<String, ArrayList<com.mkpro.models.McpServer>> mcpMap = db.hashMap("mcp_servers")
+                    .keySerializer(Serializer.STRING)
+                    .valueSerializer(Serializer.JAVA)
+                    .createOrOpen();
+            ArrayList<com.mkpro.models.McpServer> servers = mcpMap.get("registry");
+            return servers != null ? new ArrayList<>(servers) : new ArrayList<>();
+        }
+    }
+
+    public void addMcpServer(com.mkpro.models.McpServer server) {
+        List<com.mkpro.models.McpServer> servers = getMcpServers();
+        servers.add(server);
+        saveMcpServers(servers);
+    }
+
+    public boolean removeMcpServer(String serverId) {
+        List<com.mkpro.models.McpServer> servers = getMcpServers();
+        boolean removed = servers.removeIf(s -> s.getId().equals(serverId));
+        if (removed) saveMcpServers(servers);
+        return removed;
+    }
+
+    public boolean toggleMcpServer(String serverId) {
+        List<com.mkpro.models.McpServer> servers = getMcpServers();
+        for (com.mkpro.models.McpServer s : servers) {
+            if (s.getId().equals(serverId)) {
+                s.setEnabled(!s.isEnabled());
+                saveMcpServers(servers);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public List<com.mkpro.models.McpServer> getEnabledMcpServers() {
+        List<com.mkpro.models.McpServer> all = getMcpServers();
+        List<com.mkpro.models.McpServer> enabled = new ArrayList<>();
+        for (com.mkpro.models.McpServer s : all) {
+            if (s.isEnabled()) enabled.add(s);
+        }
+        return enabled;
+    }
+
+    public void updateMcpServerConnection(String serverId) {
+        List<com.mkpro.models.McpServer> servers = getMcpServers();
+        for (com.mkpro.models.McpServer s : servers) {
+            if (s.getId().equals(serverId)) {
+                s.setLastConnectedAt(System.currentTimeMillis());
+                saveMcpServers(servers);
+                return;
+            }
+        }
+    }
 }
