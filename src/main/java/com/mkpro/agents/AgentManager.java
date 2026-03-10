@@ -31,6 +31,7 @@ import com.mkpro.models.Provider;
 import com.mkpro.models.RunnerType;
 import com.mkpro.tools.MkProTools;
 import com.mkpro.tools.McpServerConnectTools;
+import com.mkpro.tools.McpServerConnectTools.ProjectInfo;
 import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 
@@ -137,6 +138,15 @@ public class AgentManager {
     public Runner createRunner(Map<String, AgentConfig> agentConfigs, String summaryContext) {
         String contextInfo = "\nCurrent Date: " + LocalDate.now() + "\nCurrent Working Directory: " + Paths.get("").toAbsolutePath().toString();
 
+        ProjectInfo projectInfo = null;
+        try {
+            projectInfo = McpServerConnectTools.detectProject(Paths.get("").toAbsolutePath());
+        } catch (Exception ignored) {}
+
+        if (projectInfo != null && !"unknown".equals(projectInfo.type)) {
+            contextInfo += "\n\nDETECTED PROJECT:\n" + projectInfo.toString();
+        }
+
         // Coordinator Model
         AgentConfig coordConfig = agentConfigs.get("Coordinator");
         BaseLlm model = createModel(coordConfig);
@@ -222,6 +232,11 @@ public class AgentManager {
         dataAnalystTools.addAll(coderTools); // Read/Write Python scripts and data files
         dataAnalystTools.add(MkProTools.createRunShellTool()); // Execute python scripts
 
+        List<BaseTool> mobileDevTools = new ArrayList<>();
+        mobileDevTools.addAll(coderTools);
+        mobileDevTools.add(MkProTools.createRunShellTool());
+        mobileDevTools.add(MkProTools.createWriteFileTool());
+
         List<BaseTool> goalTrackerTools = new ArrayList<>();
         goalTrackerTools.add(MkProTools.createAddGoalTool(centralMemory));
         goalTrackerTools.add(MkProTools.createListGoalsTool(centralMemory));
@@ -248,7 +263,9 @@ public class AgentManager {
             List<BaseTool> toolsForAgent = new ArrayList<>();
             
             // Heuristic role assignment
-            if (agentName.contains("Tester") || agentName.contains("QA")) {
+            if (agentName.contains("Android") || agentName.contains("Ios") || agentName.contains("Mobile")) {
+                toolsForAgent.addAll(mobileDevTools);
+            } else if (agentName.contains("Tester") || agentName.contains("QA")) {
                 toolsForAgent.addAll(testerTools);
             } else if (agentName.contains("SysAdmin")) {
                 toolsForAgent.addAll(sysAdminTools);
@@ -269,8 +286,6 @@ public class AgentManager {
             } else if (agentName.contains("CodeEditor")) {
                 toolsForAgent.addAll(codeEditorTools);
             } else {
-                // Default fallback for any other "Coder" or custom agent (e.g. JavaCoder, PythonCoder)
-                // They get the standard coder toolset
                 toolsForAgent.addAll(coderTools);
             }
             
@@ -344,11 +359,27 @@ public class AgentManager {
 
         String mcpContext = McpServerConnectTools.buildMcpContextForAgent(centralMemory);
 
+        String mobileRoutingContext = "";
+        if (projectInfo != null) {
+            if ("android".equals(projectInfo.type)) {
+                mobileRoutingContext = "\n\n**AUTO-DETECTED: This is an ANDROID project.**\n" +
+                    "- For ANY coding, feature development, bug fixing, or code analysis tasks, ALWAYS delegate to the AndroidDev agent (`ask_android_dev`) FIRST.\n" +
+                    "- The AndroidDev agent understands Android architecture, Kotlin/Java, Jetpack libraries, Gradle, and project-specific conventions.\n" +
+                    "- After AndroidDev provides the implementation, use CodeEditor (`ask_code_editor`) to write the files.\n";
+            } else if ("ios".equals(projectInfo.type)) {
+                mobileRoutingContext = "\n\n**AUTO-DETECTED: This is an iOS project.**\n" +
+                    "- For ANY coding, feature development, bug fixing, or code analysis tasks, ALWAYS delegate to the IosDev agent (`ask_ios_dev`) FIRST.\n" +
+                    "- The IosDev agent understands iOS architecture, Swift/ObjC, Apple frameworks, Xcode, and project-specific conventions.\n" +
+                    "- After IosDev provides the implementation, use CodeEditor (`ask_code_editor`) to write the files.\n";
+            }
+        }
+
         LlmAgent coordinatorAgent = LlmAgent.builder()
             .name("Coordinator")
             .description(coordDef.getDescription())
             .instruction(coordDef.getInstruction()
                     + contextInfo
+                    + mobileRoutingContext
                     + mcpContext
                     + summaryContext)
             .model(model)

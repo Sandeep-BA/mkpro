@@ -327,29 +327,14 @@ public class MkPro {
                 Files.createDirectories(teamsDir);
             }
             
-            Path defaultTeamPath = teamsDir.resolve("default.yaml");
-            if (!Files.exists(defaultTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/default.yaml")) {
+            // Always refresh bundled teams so users get new agents (e.g. AndroidDev, IosDev).
+            // Users who want custom teams should create their own YAML files.
+            String[] bundledTeams = {"default.yaml", "minimal.yaml", "polyglot.yaml", "adk_updater.yaml"};
+            for (String teamFile : bundledTeams) {
+                Path teamPath = teamsDir.resolve(teamFile);
+                try (var is = MkPro.class.getResourceAsStream("/teams/" + teamFile)) {
                     if (is != null) {
-                        Files.copy(is, defaultTeamPath);
-                    }
-                }
-            }
-            // Also copy minimal.yaml for reference
-            Path minimalTeamPath = teamsDir.resolve("minimal.yaml");
-            if (!Files.exists(minimalTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/minimal.yaml")) {
-                    if (is != null) {
-                        Files.copy(is, minimalTeamPath);
-                    }
-                }
-            }
-            // Also copy adk_updater.yaml for reference
-            Path adkUpdaterTeamPath = teamsDir.resolve("adk_updater.yaml");
-            if (!Files.exists(adkUpdaterTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/adk_updater.yaml")) {
-                    if (is != null) {
-                        Files.copy(is, adkUpdaterTeamPath);
+                        Files.copy(is, teamPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                     }
                 }
             }
