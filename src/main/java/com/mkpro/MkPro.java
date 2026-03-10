@@ -952,6 +952,11 @@ public class MkPro {
                             testMcpConnection(fTerminal, mcpUrl, newServer.getId(), centralMemory);
                         }
 
+                        runner = runnerFactory.apply(currentRunnerType.get());
+                        currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                        saveSessionId(currentSession.id());
+                        fTerminal.writer().println(ANSI_BLUE + "  Agent reconfigured with new MCP server." + ANSI_RESET);
+
                     } else if ("T".equalsIgnoreCase(action)) {
                         if (mcpServers.isEmpty()) {
                             fTerminal.writer().println(ANSI_BLUE + "  No servers to toggle." + ANSI_RESET);
@@ -966,6 +971,10 @@ public class MkPro {
                                 centralMemory.toggleMcpServer(s.getId());
                                 boolean newState = !s.isEnabled();
                                 fTerminal.writer().println(ANSI_GREEN + "  ✓ " + s.getName() + " is now " + (newState ? "ENABLED" : "DISABLED") + ANSI_RESET);
+                                runner = runnerFactory.apply(currentRunnerType.get());
+                                currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                saveSessionId(currentSession.id());
+                                fTerminal.writer().println(ANSI_BLUE + "  Agent reconfigured for updated MCP settings." + ANSI_RESET);
                             } else {
                                 fTerminal.writer().println(ANSI_BLUE + "  Invalid index." + ANSI_RESET);
                             }
@@ -989,6 +998,9 @@ public class MkPro {
                                 if ("y".equalsIgnoreCase(confirm)) {
                                     centralMemory.removeMcpServer(s.getId());
                                     fTerminal.writer().println(ANSI_GREEN + "  ✓ Removed: " + s.getName() + ANSI_RESET);
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
                                 } else {
                                     fTerminal.writer().println(ANSI_BLUE + "  Cancelled." + ANSI_RESET);
                                 }
@@ -1041,6 +1053,9 @@ public class MkPro {
                         McpServer s = new McpServer(name, url, type);
                         centralMemory.addMcpServer(s);
                         fTerminal.writer().println(ANSI_GREEN + "✓ Added MCP: " + s + ANSI_RESET);
+                        runner = runnerFactory.apply(currentRunnerType.get());
+                        currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                        saveSessionId(currentSession.id());
 
                     } else if ("remove".equalsIgnoreCase(sub) && parts.length >= 3) {
                         try {
@@ -1049,6 +1064,9 @@ public class MkPro {
                                 String removed = mcpServers.get(idx).getName();
                                 centralMemory.removeMcpServer(mcpServers.get(idx).getId());
                                 fTerminal.writer().println(ANSI_GREEN + "✓ Removed: " + removed + ANSI_RESET);
+                                runner = runnerFactory.apply(currentRunnerType.get());
+                                currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                saveSessionId(currentSession.id());
                             } else {
                                 fTerminal.writer().println(ANSI_BLUE + "Invalid index." + ANSI_RESET);
                             }
@@ -1061,7 +1079,12 @@ public class MkPro {
                             int idx = Integer.parseInt(parts[2]) - 1;
                             if (idx >= 0 && idx < mcpServers.size()) {
                                 McpServer s = mcpServers.get(idx);
-                                if (!s.isEnabled()) centralMemory.toggleMcpServer(s.getId());
+                                if (!s.isEnabled()) {
+                                    centralMemory.toggleMcpServer(s.getId());
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
+                                }
                                 fTerminal.writer().println(ANSI_GREEN + "✓ Enabled: " + s.getName() + ANSI_RESET);
                             }
                         } catch (NumberFormatException e) {
@@ -1073,7 +1096,12 @@ public class MkPro {
                             int idx = Integer.parseInt(parts[2]) - 1;
                             if (idx >= 0 && idx < mcpServers.size()) {
                                 McpServer s = mcpServers.get(idx);
-                                if (s.isEnabled()) centralMemory.toggleMcpServer(s.getId());
+                                if (s.isEnabled()) {
+                                    centralMemory.toggleMcpServer(s.getId());
+                                    runner = runnerFactory.apply(currentRunnerType.get());
+                                    currentSession = runner.sessionService().createSession(APP_NAME, "Coordinator").blockingGet();
+                                    saveSessionId(currentSession.id());
+                                }
                                 fTerminal.writer().println(ANSI_GREEN + "✓ Disabled: " + s.getName() + ANSI_RESET);
                             }
                         } catch (NumberFormatException e) {

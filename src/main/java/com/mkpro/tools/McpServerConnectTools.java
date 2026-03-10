@@ -46,6 +46,31 @@ public class McpServerConnectTools {
     private static final Map<String, String> SESSION_CACHE = new HashMap<>();
     private static final Object SESSION_LOCK = new Object();
 
+    /**
+     * Quick reachability check — tries to connect within a short timeout.
+     * Returns true if the server responded (even with an error), false if unreachable.
+     */
+    private static void checkServerReachable(String serverUrl) throws Exception {
+        try {
+            HttpRequest pingReq = HttpRequest.newBuilder()
+                    .uri(URI.create(serverUrl))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(8))
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"ping\"}"))
+                    .build();
+            HTTP_CLIENT.send(pingReq, HttpResponse.BodyHandlers.discarding());
+        } catch (java.net.http.HttpConnectTimeoutException e) {
+            throw new RuntimeException("MCP server is not reachable at " + serverUrl + " (connection timed out). " +
+                    "Please check if the server is running.");
+        } catch (java.net.ConnectException e) {
+            throw new RuntimeException("MCP server is not reachable at " + serverUrl + " (connection refused). " +
+                    "Please start the server or check the URL.");
+        } catch (java.net.http.HttpTimeoutException e) {
+            throw new RuntimeException("MCP server at " + serverUrl + " did not respond in time. " +
+                    "The server may be down or overloaded.");
+        }
+    }
+
     private static String initializeMcpSession(String serverUrl) throws Exception {
         String initPayload = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{" +
                 "\"protocolVersion\":\"2024-11-05\"," +
@@ -252,7 +277,23 @@ public class McpServerConnectTools {
 
                 return Single.fromCallable(() -> {
                     String serverUrl = resolveServerUrl(serverRef, centralMemory);
+                    if (serverUrl == null) {
+                        boolean hasDisabled = centralMemory.getMcpServers().stream()
+                                .anyMatch(s -> !s.isEnabled());
+                        String msg = hasDisabled
+                                ? "No enabled MCP server found matching '" + serverRef + "'. The server may be disabled — enable it via /mcp → [T] Toggle."
+                                : "No MCP server found matching '" + serverRef + "'. Add one using /mcp → [A] Add new server.";
+                        System.out.println(ANSI_YELLOW + "[MCP] ✗ " + msg + ANSI_RESET);
+                        return Collections.singletonMap("error", msg);
+                    }
                     System.out.println(ANSI_BLUE + "[MCP] → " + serverUrl + " | " + action + ANSI_RESET);
+
+                    try {
+                        checkServerReachable(serverUrl);
+                    } catch (Exception e) {
+                        System.out.println(ANSI_YELLOW + "[MCP] ✗ " + e.getMessage() + ANSI_RESET);
+                        return Collections.singletonMap("error", e.getMessage());
+                    }
 
                     try {
                         String payload;
@@ -365,8 +406,34 @@ public class McpServerConnectTools {
                     // ── Step 2: Resolve MCP server ──
                     progress("Step 2/5: Resolving Figma MCP server...");
                     String serverUrl = resolveFigmaServerUrl(finalInput, centralMemory);
+
+                    if (serverUrl == null) {
+                        // Check if a FIGMA server exists but is disabled
+                        boolean hasFigmaDisabled = centralMemory.getMcpServers().stream()
+                                .anyMatch(s -> s.getType() == McpServer.McpType.FIGMA && !s.isEnabled());
+                        if (hasFigmaDisabled) {
+                            progress("  ✗ Figma MCP server is DISABLED. Enable it via /mcp → [T] Toggle.");
+                            return Collections.singletonMap("error",
+                                    "Figma MCP server is configured but currently DISABLED. " +
+                                    "Please enable it using /mcp → [T] Toggle enable/disable, then try again.");
+                        }
+                        progress("  ✗ No Figma MCP server configured.");
+                        return Collections.singletonMap("error",
+                                "No Figma MCP server is configured. " +
+                                "Add one using /mcp → [A] Add new server.");
+                    }
                     progress("  ✓ Server: " + serverUrl);
                     result.put("server_url", serverUrl);
+
+                    // ── Step 2b: Quick reachability check ──
+                    progress("  Checking server connectivity...");
+                    try {
+                        checkServerReachable(serverUrl);
+                        progress("  ✓ Server is reachable");
+                    } catch (Exception e) {
+                        progress("  ✗ " + e.getMessage());
+                        return Collections.singletonMap("error", e.getMessage());
+                    }
 
                     // ── Step 3: Fetch design_context (heavy call, 120s timeout) ──
                     progress("Step 3/5: Fetching design context (this may take up to 2 min)...");
@@ -1065,44 +1132,42 @@ public class McpServerConnectTools {
         // Direct URL - use as-is
         if (ref.startsWith("http://") || ref.startsWith("https://")) return ref;
 
-        List<McpServer> allServers = centralMemory.getMcpServers();
+        List<McpServer> enabledServers = centralMemory.getEnabledMcpServers();
 
-        // Match by name (case-insensitive, partial match)
-        for (McpServer s : allServers) {
+        // Match by name (case-insensitive, exact then partial) — only enabled servers
+        for (McpServer s : enabledServers) {
             if (s.getName().equalsIgnoreCase(ref)) return s.getUrl();
         }
-        for (McpServer s : allServers) {
+        for (McpServer s : enabledServers) {
             if (s.getName().toLowerCase().contains(ref.toLowerCase())) return s.getUrl();
         }
 
-        // Match by type (e.g. agent passes "FIGMA", "BROWSER", etc.)
+        // Match by type — only enabled servers
         try {
             McpServer.McpType type = McpServer.McpType.valueOf(ref.toUpperCase());
-            for (McpServer s : allServers) {
-                if (s.getType() == type && s.isEnabled()) return s.getUrl();
-            }
-            for (McpServer s : allServers) {
+            for (McpServer s : enabledServers) {
                 if (s.getType() == type) return s.getUrl();
             }
         } catch (IllegalArgumentException ignored) {}
 
         // Last resort: return first enabled server
-        List<McpServer> enabled = centralMemory.getEnabledMcpServers();
-        if (!enabled.isEmpty()) return enabled.get(0).getUrl();
-        if (!allServers.isEmpty()) return allServers.get(0).getUrl();
+        if (!enabledServers.isEmpty()) return enabledServers.get(0).getUrl();
 
-        return ref;
+        return null;
     }
 
     private static String resolveFigmaServerUrl(String input, CentralMemory centralMemory) {
-        // If input is a figma.com URL, find the FIGMA-type MCP server
+        // If input is a figma.com URL, find an ENABLED FIGMA-type MCP server
         if (input.contains("figma.com") || input.contains("figma.dev")) {
-            List<McpServer> servers = centralMemory.getEnabledMcpServers();
-            for (McpServer s : servers) {
+            List<McpServer> enabledServers = centralMemory.getEnabledMcpServers();
+            for (McpServer s : enabledServers) {
                 if (s.getType() == McpServer.McpType.FIGMA) return s.getUrl();
             }
+            // Check if a Figma server exists but is disabled — give a clear message
             for (McpServer s : centralMemory.getMcpServers()) {
-                if (s.getType() == McpServer.McpType.FIGMA) return s.getUrl();
+                if (s.getType() == McpServer.McpType.FIGMA && !s.isEnabled()) {
+                    return null; // caller handles null as "server disabled"
+                }
             }
         }
         return resolveServerUrl(input, centralMemory);
@@ -1121,67 +1186,106 @@ public class McpServerConnectTools {
     }
 
     public static String buildMcpContextForAgent(CentralMemory centralMemory) {
-        List<McpServer> servers = centralMemory.getEnabledMcpServers();
-        if (servers.isEmpty()) return "";
+        List<McpServer> allServers = centralMemory.getMcpServers();
+        List<McpServer> enabledServers = centralMemory.getEnabledMcpServers();
 
-        StringBuilder sb = new StringBuilder("\n\n═══ MCP SERVERS AVAILABLE ═══\n");
-        for (McpServer s : servers) {
+        if (allServers.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+
+        // Always include the MCP error-handling policy so the agent knows what to do
+        sb.append("\n\n═══ MCP SERVER ERROR POLICY (MANDATORY) ═══\n");
+        sb.append("When ANY MCP tool (mcp_fetch_design, mcp_server_connect, etc.) returns an error:\n");
+        sb.append("  1. IMMEDIATELY report the error message to the user exactly as returned.\n");
+        sb.append("  2. STOP. Do NOT try to work around, fix, or bypass the error.\n");
+        sb.append("  3. Do NOT delegate to SysAdmin or any other agent to connect, curl, or enable servers.\n");
+        sb.append("  4. Do NOT attempt to use shell commands (curl, nc, telnet, etc.) to reach MCP servers.\n");
+        sb.append("  5. Simply inform the user of the issue and return control to them.\n");
+        sb.append("Examples of errors you MUST just report and stop:\n");
+        sb.append("  - 'server is DISABLED' → tell user to enable via /mcp and try again.\n");
+        sb.append("  - 'server is not reachable' → tell user the server appears to be down.\n");
+        sb.append("  - 'connection refused/timed out' → tell user to check if the server is running.\n\n");
+
+        if (enabledServers.isEmpty()) {
+            sb.append("═══ MCP SERVERS — ALL DISABLED ═══\n");
+            sb.append("All configured MCP servers are currently DISABLED.\n\n");
+            sb.append("MANDATORY BEHAVIOR when user provides a Figma URL (figma.com/design/...):\n");
+            sb.append("  1. Tell the user: \"Figma MCP server is currently disabled. Please enable it using /mcp → [T] Toggle, then try again.\"\n");
+            sb.append("  2. STOP IMMEDIATELY. Return control to the user.\n");
+            sb.append("  3. Do NOT generate any code from the Figma URL.\n");
+            sb.append("  4. Do NOT delegate to SysAdmin, Coder, Architect, or ANY other agent.\n");
+            sb.append("  5. Do NOT use curl, shell commands, or any workaround to access the server.\n");
+            sb.append("  6. Do NOT attempt to create UI components based on the URL content.\n");
+            sb.append("You have NO Figma design tools available. You CANNOT process Figma URLs.\n");
+            return sb.toString();
+        }
+
+        sb.append("═══ MCP SERVERS AVAILABLE ═══\n");
+        for (McpServer s : enabledServers) {
             sb.append(String.format("  • %s (%s): %s\n", s.getName(), s.getType(), s.getUrl()));
         }
 
         sb.append("\n═══ FIGMA DESIGN-TO-CODE WORKFLOW ═══\n");
-        sb.append("Figma is a DESIGN KNOWLEDGE source. The user's PROMPT determines what to build.\n");
-        sb.append("The output can be ANY platform: HTML/CSS, Android (XML/Kotlin/Compose), iOS (SwiftUI/UIKit), ");
-        sb.append("React (JSX/TSX), Flutter (Dart), or any other format.\n\n");
+        sb.append("Figma is a DESIGN KNOWLEDGE source. The generated code MUST match the project type.\n\n");
 
         sb.append("When a user provides a Figma URL (containing figma.com/design/), follow this workflow:\n\n");
 
-        sb.append("STEP 1 — DETERMINE TARGET PLATFORM from the user's prompt:\n");
-        sb.append("  - 'create in html' / 'build a webpage' → target_platform='web'\n");
-        sb.append("  - 'create android' / 'build in kotlin' / 'compose' → target_platform='android'\n");
-        sb.append("  - 'create ios' / 'swiftui' / 'swift' → target_platform='ios'\n");
-        sb.append("  - 'create react' / 'tsx' / 'next.js' → target_platform='react'\n");
-        sb.append("  - 'create flutter' / 'dart' → target_platform='flutter'\n");
-        sb.append("  - If unclear, ask the user or default to 'general'\n\n");
+        sb.append("STEP 1 — DETECT PROJECT TYPE (MANDATORY FIRST STEP):\n");
+        sb.append("  Call scan_project FIRST to detect the current project type.\n");
+        sb.append("  The detected project type determines the target platform:\n");
+        sb.append("    android         → target_platform='android'  (generate Kotlin/Compose or XML layouts)\n");
+        sb.append("    ios             → target_platform='ios'      (generate SwiftUI or UIKit code)\n");
+        sb.append("    react / nextjs  → target_platform='react'    (generate TSX/JSX components)\n");
+        sb.append("    flutter         → target_platform='flutter'  (generate Dart widgets)\n");
+        sb.append("    vue / angular   → target_platform='react'    (generate framework-appropriate components)\n");
+        sb.append("    web             → target_platform='web'      (generate HTML/CSS/JS)\n");
+        sb.append("    java_maven/gradle → target_platform='web'    (generate HTML/CSS for resources)\n");
+        sb.append("    unknown         → target_platform='general'\n");
+        sb.append("  ONLY override the detected platform if the user EXPLICITLY requests a different one:\n");
+        sb.append("    e.g. 'create in html', 'make it in swift', 'build react component'\n");
+        sb.append("  If user says nothing about platform, ALWAYS use the detected project type.\n\n");
 
         sb.append("STEP 2 — FETCH DESIGN DATA:\n");
-        sb.append("  Call mcp_fetch_design with the FULL Figma URL and the target_platform.\n");
-        sb.append("  This fetches design_context + metadata + screenshot in one call.\n\n");
+        sb.append("  Call mcp_fetch_design with the FULL Figma URL and the target_platform from Step 1.\n");
+        sb.append("  This fetches design_context + metadata + screenshot in one call.\n");
+        sb.append("  If this returns an error, FOLLOW THE MCP ERROR POLICY ABOVE — report and stop.\n\n");
 
         sb.append("STEP 3 — ANALYZE the fetched design data:\n");
         sb.append("  Extract layout structure, colors, typography, spacing, border radius, shadows, images, component hierarchy.\n\n");
 
-        sb.append("STEP 4 — GENERATE CODE for the target platform:\n");
+        sb.append("STEP 4 — GENERATE CODE matching the target platform:\n");
         sb.append("  Use the EXACT design tokens (colors, fonts, sizes, spacing) from the fetched data.\n");
-        sb.append("  Platform-specific examples:\n");
-        sb.append("    Web → self-contained HTML/CSS/JS file\n");
-        sb.append("    Android → XML layouts + Kotlin/Compose code\n");
-        sb.append("    iOS → SwiftUI views or UIKit code\n");
-        sb.append("    React → TSX/JSX components with CSS\n");
-        sb.append("    Flutter → Dart widget code\n\n");
+        sb.append("  CRITICAL: The code MUST be in the language/framework matching the detected project:\n");
+        sb.append("    Android project → Kotlin + Jetpack Compose (or XML layouts + Kotlin Activity/Fragment)\n");
+        sb.append("    iOS project     → SwiftUI views (or UIKit with Storyboard)\n");
+        sb.append("    React project   → TSX/JSX component with CSS/styled-components\n");
+        sb.append("    Flutter project → Dart StatelessWidget/StatefulWidget\n");
+        sb.append("    Web project     → self-contained HTML/CSS/JS file\n");
+        sb.append("  NEVER generate HTML for an Android/iOS/Flutter/React project.\n");
+        sb.append("  NEVER generate Kotlin for a web/React/Flutter project.\n\n");
 
         sb.append("STEP 5 — SAVE using save_component:\n");
-        sb.append("  Just provide the filename with the correct extension (e.g. 'SearchScreen.kt').\n");
-        sb.append("  save_component AUTO-DETECTS the project type and saves to the right directory:\n");
-        sb.append("    Android project → app/src/main/kotlin/<package>/ui/ or app/src/main/java/<package>/\n");
-        sb.append("    iOS project → <source dir>/Views/\n");
-        sb.append("    React/Next.js → src/components/\n");
-        sb.append("    Flutter → lib/screens/ or lib/widgets/\n");
-        sb.append("    Web/Java → src/main/resources/web/ or public/\n");
-        sb.append("    Unknown → sample/ (fallback)\n\n");
+        sb.append("  Use the correct filename and extension for the platform:\n");
+        sb.append("    Android → SearchScreen.kt, PassengersScreen.kt, etc.\n");
+        sb.append("    iOS     → SearchView.swift, PassengersView.swift, etc.\n");
+        sb.append("    React   → SearchResults.tsx, Passengers.tsx, etc.\n");
+        sb.append("    Flutter → search_screen.dart, passengers_page.dart, etc.\n");
+        sb.append("    Web     → search-results.html, passengers.html, etc.\n");
+        sb.append("  save_component auto-detects the project and saves to the correct directory.\n\n");
 
-        sb.append("STEP 6 — For HTML/web files, call open_component_preview with the path returned by save_component.\n\n");
+        sb.append("STEP 6 — For HTML/web files only, call open_component_preview.\n\n");
 
         sb.append("CRITICAL RULES:\n");
-        sb.append("  - ALWAYS fetch design data first via mcp_fetch_design. Never guess the design.\n");
-        sb.append("  - The USER'S PROMPT decides the output format, NOT the Figma data.\n");
+        sb.append("  - ALWAYS call scan_project BEFORE mcp_fetch_design to detect the project type.\n");
+        sb.append("  - The PROJECT TYPE determines the output language, NOT a default assumption.\n");
+        sb.append("  - NEVER generate HTML/web code for Android, iOS, Flutter, or React projects.\n");
         sb.append("  - Use EXACT design tokens from the fetched data.\n");
-        sb.append("  - ALWAYS save output files using save_component (it auto-detects the right directory).\n");
+        sb.append("  - ALWAYS save output files using save_component.\n");
         sb.append("  - NEVER ask the user for design details. Use whatever data the tool returned.\n");
         sb.append("  - Even if some fetches fail (e.g. design_context times out), use the metadata and screenshot.\n");
         sb.append("  - Call mcp_fetch_design ONLY ONCE. Do NOT retry or call it again.\n");
         sb.append("  - After fetching, IMMEDIATELY generate code and save it. Do not hesitate.\n");
-        sb.append("  - You can call scan_project first to understand the project structure before generating code.\n");
+        sb.append("  - If mcp_fetch_design returns an error, REPORT IT TO THE USER AND STOP. Do not work around it.\n");
         return sb.toString();
     }
 }
