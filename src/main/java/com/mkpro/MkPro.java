@@ -84,6 +84,11 @@ public class MkPro {
     public static final String ANSI_BLUE = "\u001b[34m";
     public static final String ANSI_GREEN = "\u001b[32m";
     public static final String ANSI_RED = "\u001b[31m";
+    public static final String ANSI_CYAN = "\u001b[36m";
+    public static final String ANSI_PURPLE = "\u001b[35m";
+    public static final String ANSI_LIGHT_PURPLE = "\u001b[38;5;177m";
+    public static final String ANSI_WHITE = "\u001b[37m";
+    public static final String ANSI_BOLD = "\u001b[1m";
 
      private static final List<String> GEMINI_MODELS = Arrays.asList(
         "gemini-3.1-pro-preview",
@@ -101,11 +106,18 @@ public class MkPro {
         "gemini-1.5-flash-8b"
     );
 
-    // Top 3 Bedrock models for ap-south-1 (from foundation-models API)
+    // Top Bedrock models for ap-south-1 (from foundation-models API)
     private static final List<String> BEDROCK_MODELS = Arrays.asList(
-        "global.anthropic.claude-opus-4-6-v1",           // #1 Best: Claude Opus 4.6 (inference profile)
-        "global.anthropic.claude-sonnet-4-6",            // #2 Balance: Claude Sonnet 4.6 (inference profile)
-        "anthropic.claude-3-haiku-20240307-v1:0"         // #3 Fast: Claude 3 Haiku (on-demand)
+        "global.anthropic.claude-opus-4-7",              // Claude Opus 4.7 (inference profile)
+        "global.anthropic.claude-opus-4-6-v1",           // Claude Opus 4.6 (inference profile)
+        "global.anthropic.claude-sonnet-4-6",            // Claude Sonnet 4.6 (inference profile)
+        "anthropic.claude-3-haiku-20240307-v1:0"         // Claude 3 Haiku (on-demand)
+    );
+    
+    private static final List<String> SARVAM_MODELS = Arrays.asList(
+        "sarvam-m",
+        "sarvam-30b",
+        "sarvam-105b"
     );
 
     // Reusable Clipboard Handler
@@ -142,6 +154,9 @@ public class MkPro {
     }
 
     public static void main(String[] args) {
+        // Print Logo/Banner
+        printBanner();
+
         // Check for flags
         boolean useUI = false;
         boolean verbose = false;
@@ -352,6 +367,103 @@ public class MkPro {
                 return ActionLogger.inMemory();
             }
         }
+    private static void printBanner() {
+        String username = System.getProperty("user.name");
+        String date = java.time.format.DateTimeFormatter.ofPattern("EEE MMM dd, yyyy").format(java.time.LocalDate.now());
+
+        String[] logoLines = {
+            "  ███╗   ███╗██╗  ██╗██████╗ ██████╗  ██████╗ ",
+            "  ████╗ ████║██║ ██╔╝██╔══██╗██╔══██╗██╔═══██╗",
+            "  ██╔████╔██║█████╔╝ ██████╔╝██████╔╝██║   ██║",
+            "  ██║╚██╔╝██║██╔═██╗ ██╔═══╝ ██╔══██╗██║   ██║",
+            "  ██║ ╚═╝ ██║██║  ██╗██║     ██║  ██║██║   ██║",
+            "  ██║     ██║██║  ██╗██║     ██║  ██║╚██████╔╝",
+            "  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝ ╚═════╝ ",
+            "                                              "
+        };
+
+        System.out.println("");
+        
+        // Find the maximum length of the logo lines
+        int maxLength = 0;
+        for (String line : logoLines) {
+            if (line.length() > maxLength) {
+                maxLength = line.length();
+            }
+        }
+
+        // Horizontal reveal animation for the logo
+        for (int col = 1; col <= maxLength; col++) {
+            // Move cursor up by the number of lines to overwrite them
+            if (col > 1) {
+                System.out.print("\033[" + logoLines.length + "A");
+            }
+            
+            for (String line : logoLines) {
+                int endIdx = Math.min(col, line.length());
+                String visiblePart = line.substring(0, endIdx);
+                // Print the visible part with color, then clear to the end of the line
+                System.out.println(ANSI_LIGHT_PURPLE + ANSI_BOLD + visiblePart + ANSI_RESET + "\033[K");
+            }
+            
+            try {
+                Thread.sleep(15); // 15ms per column for a fast horizontal sweep
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        System.out.println();
+        System.out.println(ANSI_WHITE + "  Built by " + ANSI_RED + ANSI_BOLD + "redBus" + ANSI_RESET + ANSI_WHITE + " Engineering " + ANSI_RESET);
+        System.out.println();
+
+        // Animate the info text typing effect horizontally (character by character)
+        String[] infoLines = {
+            ANSI_WHITE + "  Logged in as: " + ANSI_CYAN + username + ANSI_RESET,
+            ANSI_WHITE + "  Today's Date: " + ANSI_LIGHT_PURPLE + date + ANSI_RESET,
+            "",
+            ANSI_WHITE + "  Tips for getting started:" + ANSI_RESET,
+            ANSI_WHITE + "  1. Ask questions, edit files, or run commands." + ANSI_RESET,
+            ANSI_WHITE + "  2. Be specific for the best results." + ANSI_RESET,
+            ANSI_WHITE + "  3. " + ANSI_CYAN + "/help" + ANSI_WHITE + " for more information." + ANSI_RESET
+        };
+
+        for (String line : infoLines) {
+            if (line.isEmpty()) {
+                System.out.println();
+                continue;
+            }
+            
+            // Strip ANSI codes for length calculation, but we need to print them correctly.
+            // For simplicity in this CLI, we'll just print the whole styled string if it contains ANSI,
+            // or we can do a simple char-by-char print if we handle ANSI blocks.
+            // To keep it clean and avoid breaking ANSI codes mid-print, we'll print the line 
+            // but simulate typing by flushing small chunks.
+            
+            boolean inAnsi = false;
+            for (int i = 0; i < line.length(); i++) {
+                char c = line.charAt(i);
+                System.out.print(c);
+                
+                if (c == '\033') {
+                    inAnsi = true;
+                }
+                if (inAnsi && c == 'm') {
+                    inAnsi = false;
+                }
+                
+                if (!inAnsi) {
+                    System.out.flush();
+                    try {
+                        Thread.sleep(5); // 5ms per character
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+            System.out.println();
+        }
+        System.out.println("");
     }
 
     private static Path setupTeamsDir() {
@@ -361,29 +473,14 @@ public class MkPro {
                 Files.createDirectories(teamsDir);
             }
             
-            Path defaultTeamPath = teamsDir.resolve("default.yaml");
-            if (!Files.exists(defaultTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/default.yaml")) {
+            // Always refresh bundled teams so users get new agents (e.g. AndroidDev, IosDev).
+            // Users who want custom teams should create their own YAML files.
+            String[] bundledTeams = {"default.yaml", "minimal.yaml", "polyglot.yaml", "adk_updater.yaml"};
+            for (String teamFile : bundledTeams) {
+                Path teamPath = teamsDir.resolve(teamFile);
+                try (var is = MkPro.class.getResourceAsStream("/teams/" + teamFile)) {
                     if (is != null) {
-                        Files.copy(is, defaultTeamPath);
-                    }
-                }
-            }
-            // Also copy minimal.yaml for reference
-            Path minimalTeamPath = teamsDir.resolve("minimal.yaml");
-            if (!Files.exists(minimalTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/minimal.yaml")) {
-                    if (is != null) {
-                        Files.copy(is, minimalTeamPath);
-                    }
-                }
-            }
-            // Also copy adk_updater.yaml for reference
-            Path adkUpdaterTeamPath = teamsDir.resolve("adk_updater.yaml");
-            if (!Files.exists(adkUpdaterTeamPath)) {
-                try (var is = MkPro.class.getResourceAsStream("/teams/adk_updater.yaml")) {
-                    if (is != null) {
-                        Files.copy(is, adkUpdaterTeamPath);
+                        Files.copy(is, teamPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                     }
                 }
             }
@@ -1247,6 +1344,8 @@ public class MkPro {
                         availableModels.addAll(GEMINI_MODELS);
                     } else if (selectedProvider == Provider.BEDROCK) {
                         availableModels.addAll(BEDROCK_MODELS);
+                    } else if (selectedProvider == Provider.SARVAM) {
+                        availableModels.addAll(SARVAM_MODELS);
                     } else if (selectedProvider == Provider.OLLAMA) {
                         fTerminal.writer().println(ANSI_BLUE + "Fetching available Ollama models..." + ANSI_RESET);
                         try {
@@ -1339,8 +1438,10 @@ public class MkPro {
                             
                             if (parts.length == 3 && newProvider != agentConfigs.get(agentName).getProvider()) {
                                 if (newProvider == Provider.GEMINI) newModel = "gemini-1.5-flash";
-                                else if (newProvider == Provider.BEDROCK) newModel = "global.anthropic.claude-opus-4-6-v1";
+                                else if (newProvider == Provider.BEDROCK) newModel = "global.anthropic.claude-opus-4-7";
                                 else if (newProvider == Provider.OLLAMA) newModel = "devstral-small-2";
+                                else if (newProvider == Provider.SARVAM) newModel = "sarvam-m";
+                                else if (newProvider == Provider.AZURE) newModel = "gpt-4o";
                             }
 
                             agentConfigs.put(agentName, new AgentConfig(newProvider, newModel));
@@ -1354,7 +1455,7 @@ public class MkPro {
                                 fTerminal.writer().println(ANSI_BLUE + "Coordinator runner rebuilt. New session: " + currentSession.id() + ANSI_RESET);
                             }
                         } catch (IllegalArgumentException e) {
-                            fTerminal.writer().println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, or BEDROCK." + ANSI_RESET);
+                            fTerminal.writer().println(ANSI_BLUE + "Invalid provider: " + providerStr + ". Use OLLAMA, GEMINI, BEDROCK, SARVAM, or AZURE." + ANSI_RESET);
                         }
                     }
                 } else {

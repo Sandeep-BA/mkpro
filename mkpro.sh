@@ -1,7 +1,13 @@
 #!/bin/bash
 
-# Get the directory where this script resides
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Resolve symlink so running via /usr/local/bin/mkpro still points to project dir
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" &> /dev/null && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" &> /dev/null && pwd )"
 
 # Source env vars from .env if present (e.g. GOOGLE_API_KEY, AWS_BEARER_TOKEN_BEDROCK, BEDROCK_URL)
 if [ -f "$SCRIPT_DIR/.env" ]; then
