@@ -367,6 +367,8 @@ public class MkPro {
                 return ActionLogger.inMemory();
             }
         }
+    }
+
     private static void printBanner() {
         String username = System.getProperty("user.name");
         String date = java.time.format.DateTimeFormatter.ofPattern("EEE MMM dd, yyyy").format(java.time.LocalDate.now());
