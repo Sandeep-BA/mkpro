@@ -75,6 +75,46 @@
         }
         .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
+        .branch-switcher {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--surface2);
+            border: 1px solid var(--surface2);
+            border-radius: 6px;
+            padding: 3px 8px;
+        }
+        .branch-switcher .branch-icon { font-size: 13px; color: var(--green); }
+        .branch-switcher select {
+            background: transparent;
+            border: none;
+            color: var(--green);
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+            max-width: 150px;
+        }
+        .branch-switcher select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .username-display {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--surface2);
+            border: 1px solid var(--surface2);
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 12px;
+            color: var(--text-dim);
+            cursor: pointer;
+        }
+        .username-display:hover { border-color: var(--accent); color: var(--accent); }
+        .username-display .user-icon { font-size: 13px; }
+
         /* Main layout: sidebar + chat */
         .main-container {
             flex: 1;
@@ -504,6 +544,33 @@
         /* Hidden file input */
         #fileInput { display: none; }
 
+        /* Command Quick Buttons */
+        .command-bar {
+            display: flex;
+            gap: 6px;
+            padding: 6px 20px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--surface2);
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+        .command-bar::-webkit-scrollbar { height: 3px; }
+        .command-bar::-webkit-scrollbar-thumb { background: var(--surface2); }
+        .cmd-btn {
+            background: var(--surface2);
+            border: 1px solid var(--surface2);
+            color: var(--text-dim);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .cmd-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .cmd-btn:active { background: var(--accent); color: var(--bg); }
+
         /* Diff Viewer */
         .edit-proposal {
             align-self: flex-start;
@@ -564,6 +631,16 @@
             <a href="/knowledge">🧠 Knowledge</a>
             <a href="/db">📦 DB</a>
         </div>
+        <div class="branch-switcher" id="branchSwitcher">
+            <span class="branch-icon">⎇</span>
+            <select id="branchSelect" onchange="switchBranch(this.value)" title="Switch git branch">
+                <option>loading...</option>
+            </select>
+        </div>
+        <div class="username-display" id="usernameDisplay" onclick="promptUsername()" title="Click to set display name">
+            <span class="user-icon">👤</span>
+            <span id="usernameText">...</span>
+        </div>
         <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
         <span class="status disconnected" id="status">● Disconnected</span>
     </div>
@@ -588,6 +665,16 @@
         <div class="divider" id="divider2"></div>
         <div class="chat-container">
             <button class="sidebar-toggle-external" onclick="toggleSidebar()" title="Show file browser">📁</button>
+            <div class="command-bar">
+                <button class="cmd-btn" onclick="runCommand('/status')">📊 Status</button>
+                <button class="cmd-btn" onclick="runCommand('/stats')">📈 Stats</button>
+                <button class="cmd-btn" onclick="runCommand('/know topics')">🧠 Topics</button>
+                <button class="cmd-btn" onclick="runCommand('/know status')">⏳ Scheduler</button>
+                <button class="cmd-btn" onclick="runCommand('/train status')">🔀 Markov</button>
+                <button class="cmd-btn" onclick="runCommand('/history')">💬 History</button>
+                <button class="cmd-btn" onclick="runCommand('/config list')">⚙️ Config</button>
+                <button class="cmd-btn" onclick="runCommand('/help')">❓ Help</button>
+            </div>
             <div class="chat" id="chat"></div>
             <div class="input-area">
                 <div class="attachments-bar" id="attachments"></div>
@@ -630,6 +717,151 @@
             }
         })();
 
+        // ========== Username Alias ==========
+        let userAlias = localStorage.getItem('mkpro-username') || null;
+
+        function initUsername() {
+            if (userAlias) {
+                document.getElementById('usernameText').textContent = userAlias;
+            } else {
+                // Prompt on first visit
+                setTimeout(() => {
+                    if (!userAlias) promptUsername();
+                }, 1500);
+            }
+        }
+
+        function promptUsername() {
+            const current = userAlias || localIdentity || '';
+            const name = prompt('Set your display name (visible to other users):', current);
+            if (name && name.trim()) {
+                userAlias = name.trim();
+                localStorage.setItem('mkpro-username', userAlias);
+                document.getElementById('usernameText').textContent = userAlias;
+                // Notify server of alias
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({type: 'set_alias', alias: userAlias}));
+                }
+            }
+        }
+
+        function getDisplayName() {
+            return userAlias || localIdentity || 'unknown';
+        }
+
+        initUsername();
+
+        // ========== Git Branch Switcher ==========
+        async function loadBranches() {
+            try {
+                const resp = await fetch('/api/git/branch');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const select = document.getElementById('branchSelect');
+                select.innerHTML = '';
+
+                // Local branches
+                if (data.local && data.local.length > 0) {
+                    const localGroup = document.createElement('optgroup');
+                    localGroup.label = 'Local';
+                    for (const branch of data.local) {
+                        const opt = document.createElement('option');
+                        opt.value = branch;
+                        opt.textContent = branch;
+                        if (branch === data.current) opt.selected = true;
+                        localGroup.appendChild(opt);
+                    }
+                    select.appendChild(localGroup);
+                }
+
+                // Remote branches (only those not already local)
+                if (data.remote && data.remote.length > 0) {
+                    const localSet = new Set(data.local || []);
+                    const remoteOnly = data.remote.filter(r => {
+                        const short = r.includes('/') ? r.substring(r.indexOf('/') + 1) : r;
+                        return !localSet.has(short);
+                    });
+
+                    if (remoteOnly.length > 0) {
+                        const remoteGroup = document.createElement('optgroup');
+                        remoteGroup.label = 'Remote';
+                        for (const branch of remoteOnly) {
+                            const opt = document.createElement('option');
+                            opt.value = branch;
+                            opt.textContent = branch;
+                            remoteGroup.appendChild(opt);
+                        }
+                        select.appendChild(remoteGroup);
+                    }
+                }
+            } catch (e) {
+                // Git not available
+                document.getElementById('branchSelect').innerHTML = '<option>no git</option>';
+            }
+        }
+
+        async function switchBranch(branch) {
+            if (!branch) return;
+            try {
+                const resp = await fetch('/api/git/switch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({branch: branch, sender: localIdentity || 'unknown'})
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    alert('Branch switch failed: ' + data.error);
+                    loadBranches(); // Reset select to current
+                }
+            } catch (e) {
+                alert('Branch switch error: ' + e.message);
+                loadBranches();
+            }
+        }
+
+        function showBranchConfirmation(msg) {
+            const div = document.createElement('div');
+            div.className = 'message system';
+            div.id = 'branch-confirm-' + msg.id;
+            div.innerHTML = `⎇ <strong>${escapeHtml(msg.requested_by)}</strong> wants to switch branch to <strong>${escapeHtml(msg.branch)}</strong>. ` +
+                `Auto-proceeding in ${msg.timeout}s... ` +
+                `<button onclick="rejectBranchSwitch('${msg.id}')" style="background:var(--red);color:white;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px">✕ Object</button>`;
+            chat.appendChild(div);
+            scrollToBottom();
+
+            // Countdown
+            let secs = msg.timeout;
+            const interval = setInterval(() => {
+                secs--;
+                if (secs <= 0) clearInterval(interval);
+            }, 1000);
+        }
+
+        function rejectBranchSwitch(switchId) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'branch_reject', id: switchId}));
+            }
+            const el = document.getElementById('branch-confirm-' + switchId);
+            if (el) el.innerHTML = '⎇ Branch switch <strong>rejected</strong>.';
+        }
+
+        function onBranchSwitched(branch) {
+            // Update dropdown
+            const select = document.getElementById('branchSelect');
+            for (const opt of select.options) {
+                opt.selected = (opt.value === branch);
+            }
+            // Refresh file browser
+            if (typeof fileTree !== 'undefined') {
+                fileTree.innerHTML = '';
+                loadDirectory('', fileTree, 0);
+            }
+            // Show system message
+            addSystemMessage('Branch switched to: ' + branch);
+        }
+
+        loadBranches();
+
         // Configure marked for markdown rendering
         marked.setOptions({
             highlight: (code, lang) => {
@@ -652,6 +884,7 @@
         let streamBuffer = '';
         let loaderEl = null;
         let pendingAttachments = []; // {name, content, type, isImage}
+        let localIdentity = null; // Set when we receive welcome message
 
         // ========== Timestamp helper ==========
         function getTimestamp() {
@@ -764,6 +997,17 @@
             switch (msg.type) {
                 case 'system':
                     addSystemMessage(msg.text);
+                    // Capture our identity from welcome message
+                    if (msg.text && msg.text.includes('Connected to mkpro as ')) {
+                        localIdentity = msg.text.replace('Connected to mkpro as ', '').replace('. Type a message to begin.', '');
+                        if (!userAlias) {
+                            document.getElementById('usernameText').textContent = localIdentity;
+                        }
+                        // Send alias to server if we have one
+                        if (userAlias && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({type: 'set_alias', alias: userAlias}));
+                        }
+                    }
                     break;
                 case 'stream_start':
                     hideLoader();
@@ -798,7 +1042,25 @@
                 case 'edit_rejected':
                     resolveEditProposal(msg.id, false);
                     break;
+                case 'user_message':
+                    // Message from another web user — show it (skip if it's our own)
+                    showRemoteUserMessage(msg.sender, msg.text);
+                    break;
+                case 'branch_confirm':
+                    showBranchConfirmation(msg);
+                    break;
+                case 'branch_switched':
+                    onBranchSwitched(msg.branch);
+                    break;
             }
+        }
+
+        // ========== Quick Commands ==========
+        function runCommand(cmd) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            addUserMessage(cmd);
+            ws.send(JSON.stringify({ type: 'user_input', text: cmd }));
+            showLoader();
         }
 
         // ========== Send Message ==========
@@ -857,7 +1119,20 @@
         function addUserMessage(text) {
             const div = document.createElement('div');
             div.className = 'message user';
-            div.innerHTML = `<div>${escapeHtml(text).replace(/\n/g, '<br>')}</div><div class="timestamp">${getTimestamp()}</div>`;
+            const senderLabel = `<div style="font-size:10px;opacity:0.7;margin-bottom:2px">${escapeHtml(getDisplayName())}</div>`;
+            div.innerHTML = `${senderLabel}<div>${escapeHtml(text).replace(/\n/g, '<br>')}</div><div class="timestamp">${getTimestamp()}</div>`;
+            chat.appendChild(div);
+            scrollToBottom();
+        }
+
+        function showRemoteUserMessage(sender, text) {
+            // Skip if it's our own message (we already rendered it locally)
+            if (sender === localIdentity || sender === userAlias) return;
+
+            const div = document.createElement('div');
+            div.className = 'message user';
+            div.style.background = 'var(--purple)';
+            div.innerHTML = `<div style="font-size:10px;opacity:0.7;margin-bottom:2px">${escapeHtml(sender)}</div><div>${escapeHtml(text).replace(/\n/g, '<br>')}</div><div class="timestamp">${getTimestamp()}</div>`;
             chat.appendChild(div);
             scrollToBottom();
         }

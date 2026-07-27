@@ -320,19 +320,19 @@ export AWS_REGION=your_region
 
 Launch the CLI:
 ```bash
-java -jar target/mkpro-4.1.0.jar
+java -jar target/mkpro-4.1.1.jar
 ```
 
 With Web UI (opens browser chat at http://localhost:8080):
 ```bash
-java -jar target/mkpro-4.1.0.jar --web
-java -jar target/mkpro-4.1.0.jar --web 9090   # custom port
+java -jar target/mkpro-4.1.1.jar --web
+java -jar target/mkpro-4.1.1.jar --web 9090   # custom port
 ```
 
 With Knowledge Scheduler (autonomous knowledge accumulation):
 ```bash
-java -jar target/mkpro-4.1.0.jar --scheduler
-java -jar target/mkpro-4.1.0.jar --web --scheduler   # both web UI + scheduler
+java -jar target/mkpro-4.1.1.jar --scheduler
+java -jar target/mkpro-4.1.1.jar --web --scheduler   # both web UI + scheduler
 ```
 
 Or use the native executable (Windows):

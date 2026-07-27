@@ -49,6 +49,10 @@ public class WebChatServer {
 
     // All connected WebSocket clients
     private final Set<WebSocket> clients = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    // Map WebSocket connection → user identity (IP/hostname)
+    private final java.util.concurrent.ConcurrentHashMap<WebSocket, String> clientIdentities = new java.util.concurrent.ConcurrentHashMap<>();
+    // Last sender identity (for ActionLogger attribution)
+    private volatile String lastWebSender = "unknown";
 
     public WebChatServer(int httpPort) {
         this.httpPort = httpPort;
@@ -89,6 +93,27 @@ public class WebChatServer {
      */
     public void setInputHandler(WebInputHandler handler) {
         this.inputHandler = handler;
+    }
+
+    /**
+     * Get the identity (IP/hostname) of the last web user who sent a message.
+     */
+    public String getLastWebSender() {
+        return lastWebSender;
+    }
+
+    /**
+     * Get the HTTP port this server is running on.
+     */
+    public int getHttpPort() {
+        return httpPort;
+    }
+
+    /**
+     * Get the number of connected WebSocket clients.
+     */
+    public int getClientCount() {
+        return clients.size();
     }
 
     /**
@@ -135,6 +160,10 @@ public class WebChatServer {
                 handleEditRejectApi(exchange);
             } else if ("/api/edit/pending".equals(path)) {
                 handleEditPendingApi(exchange);
+            } else if ("/api/git/branch".equals(path)) {
+                handleGitBranchApi(exchange);
+            } else if ("/api/git/switch".equals(path)) {
+                handleGitSwitchApi(exchange);
             } else {
                 exchange.sendResponseHeaders(404, -1);
                 exchange.close();
@@ -235,12 +264,36 @@ public class WebChatServer {
         }
     }
 
+    /**
+     * Broadcast to all clients EXCEPT the one matching the given sender identity.
+     */
+    private void broadcastExcluding(ObjectNode message, String excludeSender) {
+        if (clients.isEmpty()) return;
+        String json = message.toString();
+        for (WebSocket client : clients) {
+            try {
+                String clientId = clientIdentities.getOrDefault(client, "");
+                if (!clientId.equals(excludeSender) && client.isOpen()) {
+                    client.send(json);
+                }
+            } catch (Exception e) { /* skip dead clients */ }
+        }
+    }
+
     private void handleWebInput(String json) {
         try {
             ObjectNode msg = (ObjectNode) mapper.readTree(json);
             String type = msg.has("type") ? msg.get("type").asText() : "";
+            String sender = msg.has("sender") ? msg.get("sender").asText() : "unknown";
+
             if ("user_input".equals(type)) {
                 String text = msg.has("text") ? msg.get("text").asText().trim() : "";
+
+                // Broadcast the user message to OTHER web clients (not the sender)
+                ObjectNode userMsg = createMessage("user_message");
+                userMsg.put("sender", sender);
+                userMsg.put("text", text);
+                broadcastExcluding(userMsg, sender);
 
                 // Process file attachments — prepend content to the message
                 if (msg.has("attachments") && msg.get("attachments").isArray()) {
@@ -278,6 +331,8 @@ public class WebChatServer {
                 }
 
                 if (!text.isEmpty() && inputHandler != null) {
+                    // Store sender on context for logging
+                    lastWebSender = sender;
                     inputHandler.onWebInput(text);
                 }
             }
@@ -677,11 +732,14 @@ public class WebChatServer {
 
         try {
             java.util.Map<String, Object> status = new java.util.LinkedHashMap<>();
-            status.put("version", "4.1.0");
+            status.put("version", "4.1.1");
             status.put("runner", mkproContext.getCurrentRunnerType().get() != null ?
                 mkproContext.getCurrentRunnerType().get().name() : "UNKNOWN");
             status.put("scheduler_active", mkproContext.getKnowledgeScheduler() != null);
             status.put("instance_name", mkproContext.getInstanceName());
+
+            // Git branch
+            status.put("git_branch", getGitBranch());
 
             // Agent count
             if (mkproContext.getAgentManager() != null) {
@@ -836,6 +894,202 @@ public class WebChatServer {
             sendJsonResponse(exchange, 200, java.util.Map.of("pending", pending));
         } catch (Exception e) {
             sendJsonError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * GET /api/git/branch — Get current branch and list all local branches.
+     */
+    private void handleGitBranchApi(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
+        try {
+            java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("current", getGitBranch());
+
+            // List all local branches
+            java.util.List<String> localBranches = new java.util.ArrayList<>();
+            try {
+                Process p = new ProcessBuilder("git", "branch", "--list").start();
+                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String branch = line.trim().replaceFirst("^\\* ", "");
+                        if (!branch.isEmpty()) localBranches.add(branch);
+                    }
+                }
+                p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) { /* ignore */ }
+
+            // List remote branches
+            java.util.List<String> remoteBranches = new java.util.ArrayList<>();
+            try {
+                Process p = new ProcessBuilder("git", "branch", "-r").start();
+                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String branch = line.trim();
+                        // Skip HEAD pointer (e.g. "origin/HEAD -> origin/main")
+                        if (branch.contains("->")) continue;
+                        if (!branch.isEmpty()) remoteBranches.add(branch);
+                    }
+                }
+                p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) { /* ignore */ }
+
+            result.put("local", localBranches);
+            result.put("remote", remoteBranches);
+            // Combined for dropdown (local first, then remote that don't have local counterpart)
+            java.util.List<String> all = new java.util.ArrayList<>(localBranches);
+            for (String remote : remoteBranches) {
+                // "origin/feature-x" → check if "feature-x" exists locally
+                String shortName = remote.contains("/") ? remote.substring(remote.indexOf('/') + 1) : remote;
+                if (!localBranches.contains(shortName)) {
+                    all.add(remote);
+                }
+            }
+            result.put("branches", all);
+
+            sendJsonResponse(exchange, 200, result);
+        } catch (Exception e) {
+            sendJsonError(exchange, 500, e.getMessage());
+        }
+    }
+
+    /**
+     * POST /api/git/switch — Request to switch to a different branch.
+     * Broadcasts confirmation to all clients. Proceeds if no objection in 5s.
+     * Request: {"branch": "feature-x"}
+     */
+    private void handleGitSwitchApi(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1); exchange.close(); return;
+        }
+
+        try {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            com.fasterxml.jackson.databind.JsonNode req = mapper.readTree(body);
+            String branch = req.has("branch") ? req.get("branch").asText().trim() : "";
+            String requestedBy = req.has("sender") ? req.get("sender").asText() : "unknown";
+
+            if (branch.isEmpty()) {
+                sendJsonError(exchange, 400, "branch field required");
+                return;
+            }
+
+            // Safety: only allow switching to existing branches, no arbitrary commands
+            if (branch.contains("..") || branch.contains(";") || branch.contains("&") || branch.contains("|")) {
+                sendJsonError(exchange, 400, "Invalid branch name");
+                return;
+            }
+
+            // If only one client connected, skip confirmation
+            if (clients.size() <= 1) {
+                executeBranchSwitch(branch, exchange);
+                return;
+            }
+
+            // Broadcast confirmation request to all clients
+            String switchId = "switch-" + System.currentTimeMillis();
+            ObjectNode confirmMsg = createMessage("branch_confirm");
+            confirmMsg.put("id", switchId);
+            confirmMsg.put("branch", branch);
+            confirmMsg.put("requested_by", requestedBy);
+            confirmMsg.put("timeout", 5);
+            broadcast(confirmMsg);
+
+            // Store pending switch
+            pendingBranchSwitch = new PendingSwitch(switchId, branch, exchange);
+
+            // Auto-proceed after 5 seconds if no objection
+            new Thread(() -> {
+                try {
+                    Thread.sleep(5000);
+                    PendingSwitch pending = pendingBranchSwitch;
+                    if (pending != null && pending.id.equals(switchId) && !pending.resolved) {
+                        pending.resolved = true;
+                        executeBranchSwitch(pending.branch, pending.exchange);
+                    }
+                } catch (Exception ignored) {}
+            }, "branch-switch-timer").start();
+
+        } catch (Exception e) {
+            sendJsonError(exchange, 500, e.getMessage());
+        }
+    }
+
+    private volatile PendingSwitch pendingBranchSwitch;
+
+    private static class PendingSwitch {
+        final String id;
+        final String branch;
+        final com.sun.net.httpserver.HttpExchange exchange;
+        volatile boolean resolved = false;
+
+        PendingSwitch(String id, String branch, com.sun.net.httpserver.HttpExchange exchange) {
+            this.id = id;
+            this.branch = branch;
+            this.exchange = exchange;
+        }
+    }
+
+    /**
+     * POST /api/git/switch/reject — Any user can object to a pending branch switch.
+     */
+    public void handleBranchReject(String switchId) {
+        PendingSwitch pending = pendingBranchSwitch;
+        if (pending != null && pending.id.equals(switchId) && !pending.resolved) {
+            pending.resolved = true;
+            try {
+                sendJsonError(pending.exchange, 409, "Branch switch rejected by another user");
+            } catch (Exception ignored) {}
+
+            // Broadcast rejection
+            ObjectNode msg = createMessage("system");
+            msg.put("text", "⚠️ Branch switch to '" + pending.branch + "' was rejected.");
+            broadcast(msg);
+            pendingBranchSwitch = null;
+        }
+    }
+
+    private void executeBranchSwitch(String branch, com.sun.net.httpserver.HttpExchange exchange) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "checkout", branch);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String output;
+            try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
+                output = br.lines().collect(java.util.stream.Collectors.joining("\n"));
+            }
+            boolean success = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS) && p.exitValue() == 0;
+
+            if (success) {
+                String newBranch = getGitBranch();
+                // Broadcast branch change to all clients
+                ObjectNode msg = createMessage("branch_switched");
+                msg.put("branch", newBranch);
+                broadcast(msg);
+                sendJsonResponse(exchange, 200, java.util.Map.of("status", "switched", "branch", newBranch));
+            } else {
+                sendJsonError(exchange, 400, "Switch failed: " + output);
+            }
+            pendingBranchSwitch = null;
+        } catch (Exception e) {
+            try { sendJsonError(exchange, 500, e.getMessage()); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Get the current git branch name.
+     */
+    private static String getGitBranch() {
+        try {
+            Process p = new ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD").start();
+            try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
+                String branch = br.readLine();
+                p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+                return branch != null ? branch.trim() : "unknown";
+            }
+        } catch (Exception e) {
+            return "unknown";
         }
     }
 
@@ -1160,20 +1414,64 @@ public class WebChatServer {
         @Override
         public void onOpen(WebSocket conn, ClientHandshake handshake) {
             clients.add(conn);
-            // Send welcome message
+
+            // Capture client identity (IP address or hostname)
+            String identity = "unknown";
+            try {
+                java.net.InetSocketAddress remoteAddr = conn.getRemoteSocketAddress();
+                if (remoteAddr != null) {
+                    java.net.InetAddress addr = remoteAddr.getAddress();
+                    String hostname = addr.getHostName();
+                    String ip = addr.getHostAddress();
+                    // Prefer hostname if resolved, otherwise use IP
+                    identity = (hostname != null && !hostname.equals(ip)) ? hostname : ip;
+                }
+            } catch (Exception e) {
+                // Fallback
+            }
+            clientIdentities.put(conn, identity);
+
+            // Send welcome message with identity
             ObjectNode welcome = createMessage("system");
-            welcome.put("text", "Connected to mkpro. Type a message to begin.");
+            welcome.put("text", "Connected to mkpro as " + identity + ". Type a message to begin.");
             conn.send(welcome.toString());
         }
 
         @Override
         public void onClose(WebSocket conn, int code, String reason, boolean remote) {
             clients.remove(conn);
+            clientIdentities.remove(conn);
         }
 
         @Override
         public void onMessage(WebSocket conn, String message) {
-            handleWebInput(message);
+            // Inject sender identity into the message JSON
+            String identity = clientIdentities.getOrDefault(conn, "unknown");
+            try {
+                com.fasterxml.jackson.databind.node.ObjectNode msg = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(message);
+                msg.put("sender", identity);
+
+                // Handle branch switch rejection via WebSocket
+                String type = msg.has("type") ? msg.get("type").asText() : "";
+                if ("branch_reject".equals(type)) {
+                    String switchId = msg.has("id") ? msg.get("id").asText() : "";
+                    handleBranchReject(switchId);
+                    return;
+                }
+
+                // Handle alias update
+                if ("set_alias".equals(type)) {
+                    String alias = msg.has("alias") ? msg.get("alias").asText().trim() : "";
+                    if (!alias.isEmpty()) {
+                        clientIdentities.put(conn, alias);
+                    }
+                    return;
+                }
+
+                handleWebInput(msg.toString());
+            } catch (Exception e) {
+                handleWebInput(message);
+            }
         }
 
         @Override

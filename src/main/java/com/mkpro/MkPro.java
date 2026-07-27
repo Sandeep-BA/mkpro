@@ -132,6 +132,7 @@ public class MkPro {
         registry.register(new OllamaCommand());
         registry.register(new HistoryCommand());
         registry.register(new KnowledgeCommand());
+        registry.register(new WebCommand());
         registry.register(new HelpCommand(registry));
         registry.register(new ExitCommand());
         // /quit is an alias for /exit
@@ -154,7 +155,22 @@ public class MkPro {
             java.io.PrintStream captureStream = new java.io.PrintStream(baos, true, "UTF-8");
             java.io.PrintStream originalOut = System.out;
             
+            // Also capture terminal writer output (commands use context.getTerminal().writer())
+            java.io.PrintWriter originalWriter = null;
+            java.io.PrintWriter captureWriter = null;
+            if (context.getTerminal() != null) {
+                originalWriter = context.getTerminal().writer();
+            }
+            captureWriter = new java.io.PrintWriter(baos, true);
+
             System.setOut(captureStream);
+            // Temporarily swap terminal with a wrapper that writes to capture
+            org.jline.terminal.Terminal origTerminal = context.getTerminal();
+            if (origTerminal != null) {
+                // Use a proxy: set output stream so writer() captures
+                context.setTerminal(new org.jline.terminal.impl.DumbTerminal(
+                    new java.io.ByteArrayInputStream(new byte[0]), baos));
+            }
             try {
                 if (webRegistry == null) {
                     webRegistry = new CommandRegistry();
@@ -166,6 +182,9 @@ public class MkPro {
                 }
             } finally {
                 System.setOut(originalOut);
+                if (origTerminal != null) {
+                    context.setTerminal(origTerminal);
+                }
             }
             
             String output = baos.toString("UTF-8");
@@ -233,7 +252,9 @@ public class MkPro {
 
             if (context.getRunner() == null || context.getCurrentSession() == null) return;
 
-            context.getActionLogger().log("USER", text);
+            // Log with sender identity
+            String sender = context.getWebChatServer() != null ? context.getWebChatServer().getLastWebSender() : "web";
+            context.getActionLogger().log("USER@" + sender, text);
 
             // Markov routing (same as TerminalUI)
             String line = text;
