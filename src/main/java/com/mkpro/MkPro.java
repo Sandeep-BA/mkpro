@@ -78,6 +78,41 @@ public class MkPro {
             // Wire event bus to MakerLoop
             if (context.getMakerLoop() != null) {
                 context.getMakerLoop().setEventBus(eventBus);
+                // Wire knowledge components for proactive gap detection
+                if (context.getKnowledgeScheduler() != null) {
+                    context.getMakerLoop().setKnowledgeComponents(
+                        context.getKnowledgeScheduler(),
+                        context.getKnowledgeStore(),
+                        context.getTopicIndex());
+                    // LLM callback: use runner to ask LLM for topic suggestions
+                    final com.mkpro.core.MkProContext ctx2 = context;
+                    context.getMakerLoop().setLlmCallback(prompt -> {
+                        try {
+                            if (ctx2.getRunner() == null || ctx2.getCurrentSession() == null) return null;
+                            com.mkpro.knowledge.RequestKnowledgeTool.enterSchedulerContext();
+                            try {
+                                com.google.genai.types.Content msg = com.google.genai.types.Content.fromParts(
+                                    new com.google.genai.types.Part[]{com.google.genai.types.Part.fromText(prompt)});
+                                StringBuilder resp = new StringBuilder();
+                                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                                ctx2.getRunner().runAsync(ctx2.getCurrentSession().sessionKey(), msg)
+                                    .blockingSubscribe(
+                                        event -> event.content().ifPresent(c -> c.parts().ifPresent(parts -> {
+                                            for (com.google.genai.types.Part part : parts) {
+                                                part.text().ifPresent(resp::append);
+                                            }
+                                        })),
+                                        error -> latch.countDown(),
+                                        latch::countDown
+                                    );
+                                latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                                return resp.toString().trim().isEmpty() ? null : resp.toString().trim();
+                            } finally {
+                                com.mkpro.knowledge.RequestKnowledgeTool.exitSchedulerContext();
+                            }
+                        } catch (Exception e) { return null; }
+                    });
+                }
             }
 
             // 3. Initialize Command Registry

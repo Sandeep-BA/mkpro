@@ -33,10 +33,18 @@ public class MakerLoop {
     // Event bus (set after construction)
     private volatile com.mkpro.events.MkProEventBus eventBus;
 
+    // Knowledge components (set after construction, optional)
+    private volatile com.mkpro.knowledge.KnowledgeScheduler knowledgeScheduler;
+    private volatile com.mkpro.knowledge.KnowledgeStore knowledgeStore;
+    private volatile com.mkpro.knowledge.TopicIndex topicIndex;
+    private volatile java.util.function.Function<String, String> llmCallback; // prompt → response
+
     // Configuration
     private double autoCompleteThreshold = 0.75;
     private double escalateThreshold = 0.40;
     private int maxRetries = 3;
+    private static final int MAX_KNOWLEDGE_ACQUISITIONS_PER_GOAL = 2;
+    private static final int KNOWLEDGE_WAIT_SECONDS = 45;
 
     public MakerLoop(MarkovRouter router) {
         this.router = router;
@@ -45,6 +53,25 @@ public class MakerLoop {
 
     public void setEventBus(com.mkpro.events.MkProEventBus eventBus) {
         this.eventBus = eventBus;
+    }
+
+    /**
+     * Wire knowledge components for proactive gap detection.
+     */
+    public void setKnowledgeComponents(com.mkpro.knowledge.KnowledgeScheduler scheduler,
+                                       com.mkpro.knowledge.KnowledgeStore store,
+                                       com.mkpro.knowledge.TopicIndex index) {
+        this.knowledgeScheduler = scheduler;
+        this.knowledgeStore = store;
+        this.topicIndex = index;
+    }
+
+    /**
+     * Set LLM callback for generating knowledge topic suggestions.
+     * Function takes a prompt string and returns LLM response.
+     */
+    public void setLlmCallback(java.util.function.Function<String, String> callback) {
+        this.llmCallback = callback;
     }
 
     /**
@@ -71,6 +98,9 @@ public class MakerLoop {
         activeGoals.put(currentGoal.getGoalId(), currentGoal);
         if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.makerGoal(truncate(input, 60) + " (category: " + category + ")"));
         else System.out.println(ANSI_PURPLE + "  [Maker] New goal: \"" + truncate(input, 60) + "\" (category: " + category + ")" + ANSI_RESET);
+
+        // Proactive knowledge acquisition: check if the goal domain has coverage
+        checkAndAcquireKnowledge(input);
 
         return currentGoal;
     }
@@ -439,6 +469,122 @@ public class MakerLoop {
         
         // Cap at 1.0, threshold at 3 signal points for high confidence
         return Math.min(1.0, signals / 3.0);
+    }
+
+    /**
+     * Check if the goal domain has knowledge coverage. If not, ask LLM to suggest
+     * a topic and schedule immediate acquisition.
+     */
+    private void checkAndAcquireKnowledge(String goalText) {
+        // Guard: need all components + non-trivial goal
+        if (knowledgeScheduler == null || topicIndex == null || llmCallback == null) return;
+        if (goalText == null || goalText.split("\\s+").length < 4) return;
+
+        try {
+            // Check existing coverage
+            List<com.mkpro.knowledge.TopicIndex.SearchResult> results = topicIndex.search(goalText, 3);
+            if (!results.isEmpty() && results.get(0).getScore() > 0.3) {
+                // Already have relevant knowledge
+                return;
+            }
+
+            // Ask LLM to suggest a knowledge topic
+            String prompt = buildKnowledgeSuggestionPrompt(goalText);
+            String response = llmCallback.apply(prompt);
+            if (response == null || response.isBlank()) return;
+
+            // Parse suggestion
+            com.mkpro.knowledge.TopicConfig topic = parseKnowledgeSuggestion(response);
+            if (topic == null) return;
+
+            // Schedule acquisition
+            boolean added = knowledgeScheduler.addTopic(topic);
+            if (!added) return; // Already exists
+
+            String msg = "Acquiring knowledge: " + topic.getName() + "...";
+            if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
+            else System.out.println(ANSI_PURPLE + "  [Maker] " + msg + ANSI_RESET);
+
+            // Wait for first fetch (best-effort, non-blocking beyond timeout)
+            boolean ready = waitForTopicReady(topic.getName(), KNOWLEDGE_WAIT_SECONDS);
+
+            if (ready) {
+                String readyMsg = "Knowledge acquired: " + topic.getName();
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(readyMsg));
+                else System.out.println(ANSI_GREEN + "  [Maker] " + readyMsg + ANSI_RESET);
+            } else {
+                String timeoutMsg = "Knowledge fetch timed out for " + topic.getName() + " — proceeding without.";
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(timeoutMsg));
+                else System.out.println(ANSI_YELLOW + "  [Maker] " + timeoutMsg + ANSI_RESET);
+            }
+
+        } catch (Exception e) {
+            // Non-fatal — proceed without knowledge
+            System.out.println(ANSI_YELLOW + "  [Maker] Knowledge gap check failed: " + e.getMessage() + ANSI_RESET);
+        }
+    }
+
+    private String buildKnowledgeSuggestionPrompt(String goalText) {
+        return "A developer wants to accomplish this goal:\n\"" + goalText + "\"\n\n" +
+            "Determine if this goal requires specialized knowledge that an AI agent might not have " +
+            "(e.g., specific API docs, framework guides, best practices from official sources).\n\n" +
+            "If YES, respond with EXACTLY this format (no extra text):\n" +
+            "TOPIC:<lowercase-hyphen-name>\n" +
+            "URL:<official documentation or reference URL>\n" +
+            "FOCUS:<what to analyze, max 1 sentence>\n\n" +
+            "If NO (the goal is simple, generic, or already well-known), respond with just: NONE\n\n" +
+            "Rules:\n" +
+            "- Only suggest official documentation URLs (docs.*, developer.*, official guides)\n" +
+            "- Topic name should be specific (e.g., 'k8s-hpa-autoscaling' not 'kubernetes')\n" +
+            "- Only suggest if the knowledge would meaningfully help the task";
+    }
+
+    /**
+     * Parse LLM response into a TopicConfig.
+     * Expected format:
+     *   TOPIC:name
+     *   URL:https://...
+     *   FOCUS:instruction
+     */
+    private com.mkpro.knowledge.TopicConfig parseKnowledgeSuggestion(String response) {
+        if (response.trim().equalsIgnoreCase("NONE")) return null;
+
+        String name = null, url = null, focus = null;
+
+        for (String line : response.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("TOPIC:")) name = line.substring(6).trim();
+            else if (line.startsWith("URL:")) url = line.substring(4).trim();
+            else if (line.startsWith("FOCUS:")) focus = line.substring(6).trim();
+        }
+
+        if (name == null || name.isBlank() || url == null || url.isBlank()) return null;
+
+        com.mkpro.knowledge.TopicConfig topic = new com.mkpro.knowledge.TopicConfig();
+        topic.setName(name.toLowerCase().replaceAll("[^a-z0-9-]", "-"));
+        topic.setTitle(name);
+        topic.setSources(java.util.List.of(url));
+        topic.setInstruction(focus != null ? focus : "Analyze for practical implementation guidance.");
+        topic.setRefreshIntervalMinutes(360); // Low refresh — just need initial fetch
+        return topic;
+    }
+
+    /**
+     * Wait for a topic report to be ready in the store.
+     * @return true if ready within timeout
+     */
+    private boolean waitForTopicReady(String topicName, int maxWaitSeconds) {
+        for (int i = 0; i < maxWaitSeconds; i++) {
+            com.mkpro.knowledge.TopicReport report = knowledgeStore.getReport(topicName);
+            if (report != null && report.getSummary() != null && !report.getSummary().isBlank()) {
+                return true;
+            }
+            try { Thread.sleep(1000); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
     }
 
     private String truncate(String s, int max) {

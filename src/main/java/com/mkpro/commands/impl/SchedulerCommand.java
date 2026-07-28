@@ -140,6 +140,11 @@ public class SchedulerCommand implements Command {
 
             context.setKnowledgeScheduler(scheduler);
 
+            // Wire MakerLoop for proactive knowledge gap detection
+            if (context.getMakerLoop() != null) {
+                context.getMakerLoop().setKnowledgeComponents(scheduler, store, index);
+            }
+
             if (!topics.isEmpty()) {
                 scheduler.start();
                 System.out.println("\u001b[32m[Scheduler] Started with " + topics.size() + " topic(s).\u001b[0m");
