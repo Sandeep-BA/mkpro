@@ -379,6 +379,107 @@ public class KnowledgeScheduler {
         executor.schedule(() -> safeRefresh(newTopic), 5, TimeUnit.SECONDS);
     }
 
+    /**
+     * Add a user-defined topic at runtime. Persists to schedules.yaml.
+     * @return true if added, false if already exists
+     */
+    public boolean addTopic(TopicConfig topic) {
+        if (topic == null || topic.getName() == null || topic.getName().isBlank()) return false;
+
+        String name = topic.getName().trim().toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        topic.setName(name);
+
+        if (topicsByName.containsKey(name)) {
+            log("Topic '" + name + "' already exists.");
+            return false;
+        }
+
+        if (topic.getRefreshIntervalMinutes() < 5) {
+            topic.setRefreshIntervalMinutes(5); // Minimum 5 min
+        }
+
+        topics.add(topic);
+        topicsByName.put(name, topic);
+
+        log("Topic added: " + name);
+
+        // Schedule with first refresh in 30s
+        executor.schedule(() -> safeRefresh(topic), 30, TimeUnit.SECONDS);
+
+        // Persist to YAML
+        persistToYaml();
+
+        return true;
+    }
+
+    /**
+     * Remove a topic by name. Deletes report from store.
+     * @return true if removed, false if not found
+     */
+    public boolean removeTopic(String name) {
+        if (name == null || name.isBlank()) return false;
+        name = name.trim().toLowerCase();
+
+        TopicConfig removed = topicsByName.remove(name);
+        if (removed == null) return false;
+
+        topics.remove(removed);
+
+        // Delete stored report
+        store.deleteReport(name);
+
+        // Remove from index
+        index.removeTopic(name);
+        index.rebuildIdf();
+
+        log("Topic removed: " + name);
+
+        // Persist to YAML
+        persistToYaml();
+
+        return true;
+    }
+
+    /**
+     * Persist current topic list to .mkpro/schedules.yaml.
+     */
+    private void persistToYaml() {
+        try {
+            java.nio.file.Path yamlPath = java.nio.file.Paths.get(".mkpro", "schedules.yaml");
+            java.nio.file.Files.createDirectories(yamlPath.getParent());
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("# mkpro Knowledge Scheduler Configuration\n");
+            sb.append("# Auto-generated from runtime topic list\n\n");
+            sb.append("topics:\n");
+
+            for (TopicConfig t : topics) {
+                sb.append("  - name: ").append(t.getName()).append("\n");
+                if (t.getTitle() != null && !t.getTitle().equals(t.getName())) {
+                    sb.append("    title: \"").append(t.getTitle()).append("\"\n");
+                }
+                if (t.getSources() != null && !t.getSources().isEmpty()) {
+                    sb.append("    sources:\n");
+                    for (String src : t.getSources()) {
+                        sb.append("      - \"").append(src).append("\"\n");
+                    }
+                }
+                sb.append("    refreshIntervalMinutes: ").append(t.getRefreshIntervalMinutes()).append("\n");
+                if (t.getAgent() != null && !"Coordinator".equals(t.getAgent())) {
+                    sb.append("    agent: ").append(t.getAgent()).append("\n");
+                }
+                if (t.getInstruction() != null && !t.getInstruction().isBlank()) {
+                    sb.append("    instruction: >\n      ").append(t.getInstruction().replace("\n", "\n      ")).append("\n");
+                }
+                sb.append("\n");
+            }
+
+            java.nio.file.Files.writeString(yamlPath, sb.toString());
+        } catch (Exception e) {
+            log("Failed to persist schedules.yaml: " + e.getMessage());
+        }
+    }
+
     /** Approve a discovered topic — adds it to the scheduler */
     public void approveDiscovery(String name) {
         DiscoveredTopic discovery = pendingDiscoveries.stream()

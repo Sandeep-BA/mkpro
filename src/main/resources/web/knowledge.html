@@ -177,6 +177,7 @@
         <a href="/">← Chat</a>
         <a href="/db">📦 DB Browser</a>
         <button class="refresh-btn" onclick="loadData()">⟳ Refresh</button>
+        <button class="refresh-btn" onclick="toggleAddForm()" style="border-color:var(--green);color:var(--green)">➕ Add Topic</button>
         <span class="stats" id="stats"></span>
     </div>
 
@@ -187,6 +188,31 @@
     </div>
 
     <div class="search-results" id="searchResults"></div>
+
+    <!-- Add Topic Form -->
+    <div id="addTopicForm" style="background:var(--surface);border:1px solid var(--surface2);border-radius:8px;padding:16px;margin-bottom:20px;display:none">
+        <h3 style="color:var(--green);font-size:14px;margin-bottom:12px">➕ Add Knowledge Topic</h3>
+        <div style="display:grid;grid-template-columns:100px 1fr;gap:8px;align-items:center;font-size:12px">
+            <label>Name:</label>
+            <input id="topicName" type="text" placeholder="my-topic-name" style="background:var(--bg);border:1px solid var(--surface2);border-radius:4px;padding:6px 10px;color:var(--text);font-family:inherit;font-size:12px">
+            <label>Title:</label>
+            <input id="topicTitle" type="text" placeholder="Human readable title" style="background:var(--bg);border:1px solid var(--surface2);border-radius:4px;padding:6px 10px;color:var(--text);font-family:inherit;font-size:12px">
+            <label>Sources:</label>
+            <input id="topicSources" type="text" placeholder="https://url1.com, https://url2.com" style="background:var(--bg);border:1px solid var(--surface2);border-radius:4px;padding:6px 10px;color:var(--text);font-family:inherit;font-size:12px">
+            <label>Focus:</label>
+            <input id="topicInstruction" type="text" placeholder="What to analyze/focus on..." style="background:var(--bg);border:1px solid var(--surface2);border-radius:4px;padding:6px 10px;color:var(--text);font-family:inherit;font-size:12px">
+            <label>Interval:</label>
+            <div style="display:flex;align-items:center;gap:6px">
+                <input id="topicInterval" type="number" value="60" min="5" style="background:var(--bg);border:1px solid var(--surface2);border-radius:4px;padding:6px 10px;color:var(--text);font-family:inherit;font-size:12px;width:80px">
+                <span>minutes</span>
+            </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+            <button onclick="createTopic()" style="background:var(--green);color:var(--bg);border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">Create Topic</button>
+            <button onclick="toggleAddForm()" style="background:var(--surface2);color:var(--text-dim);border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px">Cancel</button>
+        </div>
+    </div>
+
     <div class="detail-panel" id="detailPanel"></div>
     <div class="topics-grid" id="topicsGrid"><div class="loading">Loading topics...</div></div>
 
@@ -312,6 +338,45 @@
         }
 
         loadData();
+
+        function toggleAddForm() {
+            const form = document.getElementById('addTopicForm');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function createTopic() {
+            const name = document.getElementById('topicName').value.trim();
+            const title = document.getElementById('topicTitle').value.trim();
+            const sourcesRaw = document.getElementById('topicSources').value.trim();
+            const instruction = document.getElementById('topicInstruction').value.trim();
+            const interval = parseInt(document.getElementById('topicInterval').value) || 60;
+
+            if (!name) { alert('Topic name is required'); return; }
+
+            const sources = sourcesRaw ? sourcesRaw.split(',').map(s => s.trim()).filter(s => s) : [];
+
+            try {
+                const resp = await fetch('/api/knowledge/topics', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name, title: title || name, sources, instruction, refreshIntervalMinutes: interval })
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    // Clear form and reload
+                    document.getElementById('topicName').value = '';
+                    document.getElementById('topicTitle').value = '';
+                    document.getElementById('topicSources').value = '';
+                    document.getElementById('topicInstruction').value = '';
+                    toggleAddForm();
+                    loadData();
+                }
+            } catch (err) {
+                alert('Failed: ' + err.message);
+            }
+        }
     </script>
 </body>
 </html>

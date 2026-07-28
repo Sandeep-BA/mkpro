@@ -4,6 +4,7 @@ import com.mkpro.commands.Command;
 import com.mkpro.core.MkProContext;
 import com.mkpro.knowledge.KnowledgeScheduler;
 import com.mkpro.knowledge.KnowledgeStore;
+import com.mkpro.knowledge.TopicConfig;
 import com.mkpro.knowledge.TopicIndex;
 import com.mkpro.knowledge.TopicReport;
 
@@ -86,6 +87,42 @@ public class KnowledgeCommand implements Command {
                 } else {
                     scheduler.dismissDiscovery(args[1]);
                     out.println("\u001b[32mDismissed topic: " + args[1] + "\u001b[0m");
+                }
+            }
+            case "add" -> {
+                if (scheduler == null) {
+                    out.println("\u001b[33mScheduler not active. Start with --scheduler flag.\u001b[0m");
+                } else if (args.length < 3) {
+                    out.println("\u001b[33mUsage: /know add <name> <url> [instruction]\u001b[0m");
+                } else {
+                    TopicConfig newTopic = new TopicConfig();
+                    newTopic.setName(args[1]);
+                    newTopic.setTitle(args[1]);
+                    newTopic.setSources(java.util.List.of(args[2]));
+                    if (args.length > 3) {
+                        newTopic.setInstruction(String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length)));
+                    }
+                    newTopic.setRefreshIntervalMinutes(60);
+                    boolean created = scheduler.addTopic(newTopic);
+                    if (created) {
+                        out.println("\u001b[32m✓ Topic '" + args[1] + "' created. First refresh in 30s.\u001b[0m");
+                    } else {
+                        out.println("\u001b[33mTopic '" + args[1] + "' already exists.\u001b[0m");
+                    }
+                }
+            }
+            case "remove" -> {
+                if (scheduler == null) {
+                    out.println("\u001b[33mScheduler not active.\u001b[0m");
+                } else if (args.length < 2) {
+                    out.println("\u001b[33mUsage: /know remove <name>\u001b[0m");
+                } else {
+                    boolean removed = scheduler.removeTopic(args[1]);
+                    if (removed) {
+                        out.println("\u001b[32m✓ Topic '" + args[1] + "' removed.\u001b[0m");
+                    } else {
+                        out.println("\u001b[33mTopic '" + args[1] + "' not found.\u001b[0m");
+                    }
                 }
             }
             default -> {

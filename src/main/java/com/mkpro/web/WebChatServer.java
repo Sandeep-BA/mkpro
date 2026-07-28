@@ -136,6 +136,8 @@ public class WebChatServer {
                 serveKnowledgeApi(exchange);
             } else if (path.startsWith("/api/knowledge/search")) {
                 serveKnowledgeSearchApi(exchange);
+            } else if ("/api/knowledge/topics".equals(path)) {
+                handleKnowledgeTopicsApi(exchange);
             } else if (path.startsWith("/api/files")) {
                 serveFilesApi(exchange);
             } else if (path.startsWith("/api/file-content")) {
@@ -1190,6 +1192,87 @@ public class WebChatServer {
 
     private void sendJsonError(com.sun.net.httpserver.HttpExchange exchange, int code, String message) throws IOException {
         sendJsonResponse(exchange, code, java.util.Map.of("error", message != null ? message : "Unknown error"));
+    }
+
+    /**
+     * POST /api/knowledge/topics — Add a new topic.
+     * DELETE /api/knowledge/topics?name= — Remove a topic.
+     */
+    private void handleKnowledgeTopicsApi(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
+        String method = exchange.getRequestMethod().toUpperCase();
+
+        if ("POST".equals(method)) {
+            // Add topic
+            if (mkproContext == null || mkproContext.getKnowledgeScheduler() == null) {
+                sendJsonError(exchange, 503, "Knowledge scheduler not active. Start with --scheduler flag.");
+                return;
+            }
+
+            try {
+                String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                com.fasterxml.jackson.databind.JsonNode req = mapper.readTree(body);
+
+                String name = req.has("name") ? req.get("name").asText().trim() : "";
+                if (name.isEmpty()) { sendJsonError(exchange, 400, "name field required"); return; }
+
+                com.mkpro.knowledge.TopicConfig topic = new com.mkpro.knowledge.TopicConfig();
+                topic.setName(name);
+                topic.setTitle(req.has("title") ? req.get("title").asText() : name);
+                topic.setInstruction(req.has("instruction") ? req.get("instruction").asText() : "");
+                topic.setRefreshIntervalMinutes(req.has("refreshIntervalMinutes") ? req.get("refreshIntervalMinutes").asInt() : 60);
+                if (req.has("agent")) topic.setAgent(req.get("agent").asText());
+
+                // Parse sources array
+                java.util.List<String> sources = new java.util.ArrayList<>();
+                if (req.has("sources") && req.get("sources").isArray()) {
+                    for (com.fasterxml.jackson.databind.JsonNode s : req.get("sources")) {
+                        String url = s.asText().trim();
+                        if (!url.isEmpty()) sources.add(url);
+                    }
+                }
+                topic.setSources(sources);
+
+                boolean created = mkproContext.getKnowledgeScheduler().addTopic(topic);
+                if (created) {
+                    sendJsonResponse(exchange, 201, java.util.Map.of(
+                        "status", "created", "name", topic.getName(), "nextRefresh", "in 30s"));
+                } else {
+                    sendJsonError(exchange, 409, "Topic '" + name + "' already exists.");
+                }
+            } catch (Exception e) {
+                sendJsonError(exchange, 500, e.getMessage());
+            }
+
+        } else if ("DELETE".equals(method)) {
+            // Remove topic
+            if (mkproContext == null || mkproContext.getKnowledgeScheduler() == null) {
+                sendJsonError(exchange, 503, "Knowledge scheduler not active.");
+                return;
+            }
+
+            String name = "";
+            String rawQuery = exchange.getRequestURI().getQuery();
+            if (rawQuery != null) {
+                for (String param : rawQuery.split("&")) {
+                    if (param.startsWith("name=")) {
+                        name = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                    }
+                }
+            }
+
+            if (name.isEmpty()) { sendJsonError(exchange, 400, "name parameter required"); return; }
+
+            boolean removed = mkproContext.getKnowledgeScheduler().removeTopic(name);
+            if (removed) {
+                sendJsonResponse(exchange, 200, java.util.Map.of("status", "deleted", "name", name));
+            } else {
+                sendJsonError(exchange, 404, "Topic '" + name + "' not found.");
+            }
+
+        } else {
+            exchange.sendResponseHeaders(405, -1);
+            exchange.close();
+        }
     }
 
     private static final java.util.Set<String> EXCLUDED_DIRS = java.util.Set.of(
