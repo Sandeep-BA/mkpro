@@ -243,6 +243,24 @@ public class MkPro {
      */
     private static CommandRegistry webRegistry;
     
+    /**
+     * Public accessor for processWebInput — used by /web command to wire input handler.
+     */
+    public static void processWebInputPublic(com.mkpro.core.MkProContext context, String text) {
+        processWebInput(context, text);
+    }
+
+    /**
+     * Get (or lazily create) the web command registry.
+     */
+    public static CommandRegistry getWebRegistry() {
+        if (webRegistry == null) {
+            webRegistry = new CommandRegistry();
+            registerCommands(webRegistry);
+        }
+        return webRegistry;
+    }
+
     private static void processWebInput(com.mkpro.core.MkProContext context, String text) {
         try {
             com.mkpro.web.WebChatServer web = context.getWebChatServer();

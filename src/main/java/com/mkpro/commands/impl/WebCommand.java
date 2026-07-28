@@ -79,6 +79,17 @@ public class WebCommand implements Command {
             webServer.start();
             context.setWebChatServer(webServer);
 
+            // Wire input handler (process web messages via runner)
+            final com.mkpro.core.MkProContext ctx = context;
+            webServer.setInputHandler(text -> {
+                new Thread(() -> com.mkpro.MkPro.processWebInputPublic(ctx, text), "web-input").start();
+            });
+
+            // Wire command registry
+            if (com.mkpro.MkPro.getWebRegistry() != null) {
+                webServer.setCommandRegistry(com.mkpro.MkPro.getWebRegistry());
+            }
+
             // Register WebSocket sink on event bus
             if (context.getEventBus() != null) {
                 context.getEventBus().register(new com.mkpro.events.WebSocketSink(webServer));
