@@ -151,27 +151,27 @@ public class MkPro {
      */
     private static void processWebCommand(com.mkpro.core.MkProContext context, String text, com.mkpro.web.WebChatServer web) {
         try {
-            // Capture stdout during command execution
+            // Capture ALL output: System.out + terminal writer
             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
             java.io.PrintStream captureStream = new java.io.PrintStream(baos, true, "UTF-8");
             java.io.PrintStream originalOut = System.out;
             
-            // Also capture terminal writer output (commands use context.getTerminal().writer())
-            java.io.PrintWriter originalWriter = null;
-            java.io.PrintWriter captureWriter = null;
-            if (context.getTerminal() != null) {
-                originalWriter = context.getTerminal().writer();
-            }
-            captureWriter = new java.io.PrintWriter(baos, true);
-
+            // Redirect System.out
             System.setOut(captureStream);
-            // Temporarily swap terminal with a wrapper that writes to capture
+
+            // Temporarily replace terminal with one that writes to our capture buffer
             org.jline.terminal.Terminal origTerminal = context.getTerminal();
-            if (origTerminal != null) {
-                // Use a proxy: set output stream so writer() captures
-                context.setTerminal(new org.jline.terminal.impl.DumbTerminal(
-                    new java.io.ByteArrayInputStream(new byte[0]), baos));
+            org.jline.terminal.Terminal captureTerminal = null;
+            try {
+                captureTerminal = org.jline.terminal.TerminalBuilder.builder()
+                    .streams(new java.io.ByteArrayInputStream(new byte[0]), baos)
+                    .dumb(true)
+                    .build();
+                context.setTerminal(captureTerminal);
+            } catch (Exception e) {
+                // If terminal creation fails, proceed with just System.out capture
             }
+
             try {
                 if (webRegistry == null) {
                     webRegistry = new CommandRegistry();
@@ -181,10 +181,15 @@ public class MkPro {
                 if (!handled) {
                     System.out.println("Unknown command: " + text);
                 }
+                // Flush the capture terminal writer
+                if (captureTerminal != null) {
+                    captureTerminal.writer().flush();
+                }
             } finally {
                 System.setOut(originalOut);
-                if (origTerminal != null) {
-                    context.setTerminal(origTerminal);
+                context.setTerminal(origTerminal);
+                if (captureTerminal != null) {
+                    try { captureTerminal.close(); } catch (Exception ignored) {}
                 }
             }
             
