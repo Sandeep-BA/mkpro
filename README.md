@@ -240,8 +240,16 @@ For detailed mTLS procedures, refer to:
 | `/know topic <name>` | Show full report for a specific topic |
 | `/know status` | Show knowledge scheduler status |
 | `/know refresh <name>` | Force refresh a topic (or 'all') |
+| `/know add <name> <url>` | Add a new knowledge topic at runtime |
+| `/know remove <name>` | Remove a topic and its report |
 | `/know approve <name>` | Promote a discovered sub-topic to scheduled |
 | `/know dismiss <name>` | Discard a pending discovery |
+| `/scheduler` | Show Knowledge Scheduler status |
+| `/scheduler on` | Start scheduler mid-session (loads schedules.yaml) |
+| `/scheduler off` | Stop scheduler (preserves data, /know search still works) |
+| `/web` | Show web server status (port, connected clients) |
+| `/web on [port]` | Start web server mid-session |
+| `/web off` | Stop web server, disconnect all clients |
 | `/status` | Show system status, endpoints, and agent assignments |
 | `/help` | Show available commands |
 | `/exit`, `/quit` | Exit the application |
@@ -373,8 +381,17 @@ When running with `--web`, mkpro exposes a full HTTP REST API alongside the WebS
 | `GET` | `/api/agents` | List all agents with tools, model, and provider |
 | `GET` | `/api/knowledge` | All knowledge topics as JSON |
 | `GET` | `/api/knowledge/search?q=` | TF-IDF knowledge search |
+| `POST` | `/api/knowledge/topics` | Add a new knowledge topic |
+| `DELETE` | `/api/knowledge/topics?name=` | Remove a knowledge topic |
+| `GET` | `/api/git/branch` | Current branch + all local/remote branches |
+| `POST` | `/api/git/switch` | Switch git branch (with multi-user confirmation) |
 | `GET` | `/api/files?path=` | List project directory contents |
 | `GET` | `/api/file-content?path=` | Read file content (10KB cap) |
+| `GET` | `/api/file-raw?path=` | Raw binary file with MIME type (20MB cap) |
+| `GET` | `/api/history?offset=&limit=` | Paginated chat history |
+| `POST` | `/api/edit/approve` | Approve pending file edit |
+| `POST` | `/api/edit/reject` | Reject pending file edit |
+| `GET` | `/api/edit/pending` | List pending edit proposals |
 | `GET` | `/api/db` | MapDB store browser (all stores as JSON) |
 
 ### Usage Examples
