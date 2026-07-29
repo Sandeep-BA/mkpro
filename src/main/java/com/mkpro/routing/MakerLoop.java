@@ -45,6 +45,11 @@ public class MakerLoop {
     private int maxRetries = 3;
     private static final int MAX_KNOWLEDGE_ACQUISITIONS_PER_GOAL = 2;
     private static final int KNOWLEDGE_WAIT_SECONDS = 45;
+    private static final int PERIODIC_SAVE_INTERVAL = 10; // Save model every N turns
+
+    // Periodic save state
+    private volatile int globalTurnCounter = 0;
+    private volatile java.nio.file.Path modelSavePath;
 
     public MakerLoop(MarkovRouter router) {
         this.router = router;
@@ -139,6 +144,21 @@ public class MakerLoop {
 
         // Only inject stimulus after the first turn (let the first delegation happen naturally)
         if (currentGoal.getTurnCount() == 0) {
+            // Layer 2: Pre-delegation hint — suggest expected tools for the predicted agent
+            MarkovRouter.RoutingDecision predicted = router.route(currentGoal.getCategory(), null);
+            if (predicted.confidence > 0.4) {
+                List<MarkovRouter.ToolPrediction> tools = router.getExpectedTools(predicted.agent, currentGoal.getCategory(), 3);
+                if (!tools.isEmpty()) {
+                    StringBuilder hint = new StringBuilder("[TOOL HINT] For this task type, ");
+                    hint.append(predicted.agent).append(" typically uses: ");
+                    for (int i = 0; i < tools.size(); i++) {
+                        if (i > 0) hint.append(", ");
+                        hint.append(tools.get(i).tool);
+                    }
+                    hint.append(".");
+                    return hint.toString();
+                }
+            }
             return null;
         }
 
@@ -209,10 +229,33 @@ public class MakerLoop {
         // Record this turn
         currentGoal.recordTurn(agentUsed, toolsInvoked, success);
 
+        // Periodic mid-session model save
+        globalTurnCounter++;
+        if (globalTurnCounter % PERIODIC_SAVE_INTERVAL == 0 && modelSavePath != null) {
+            try {
+                router.save(modelSavePath);
+            } catch (Exception e) {
+                // Non-fatal — model will be saved on exit regardless
+            }
+        }
+
         // Track if this is a successful turn after a knowledge-driven retry
         if (success && currentGoal.getPhase() == MakerState.GoalPhase.RETRYING
                 && currentGoal.getKnowledgeRetries() > currentGoal.getKnowledgeRetrySuccesses()) {
             currentGoal.incrementKnowledgeRetrySuccesses();
+        }
+
+        // Layer 2: Anomaly detection — flag unexpected tool usage
+        if (toolsInvoked != null && !toolsInvoked.isEmpty() && agentUsed != null) {
+            for (String tool : toolsInvoked) {
+                if (router.isAnomalousTool(agentUsed, currentGoal.getCategory(), tool)) {
+                    String msg = "⚠ Anomaly: " + agentUsed + " used unexpected tool '" + tool + "' for " + currentGoal.getCategory();
+                    if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
+                    else System.out.println(ANSI_YELLOW + "  [Maker] " + msg + ANSI_RESET);
+                    currentGoal.setAnomalousToolDetected(true);
+                    break; // Only flag once per turn
+                }
+            }
         }
 
         // Show turn progress with reasoning
@@ -256,6 +299,10 @@ public class MakerLoop {
         } else {
             // Check stall prediction before deciding CONTINUE
             double stallProb = router.predictStall(currentGoal.getCategory(), currentGoal.getAgentSequence());
+            // Layer 2: Anomalous tool usage boosts stall probability
+            if (currentGoal.isAnomalousToolDetected()) {
+                stallProb = Math.min(1.0, stallProb + 0.25);
+            }
             if (stallProb >= 0.6) {
                 java.util.Set<String> triedAgents = new java.util.HashSet<>(currentGoal.getAgentSequence());
                 String alternative = router.routeExcluding(currentGoal.getCategory(), triedAgents);
@@ -550,6 +597,13 @@ public class MakerLoop {
      */
     public java.util.Collection<MakerState> getAllGoals() {
         return activeGoals.values();
+    }
+
+    /**
+     * Set the model save path for periodic mid-session saves.
+     */
+    public void setModelSavePath(java.nio.file.Path path) {
+        this.modelSavePath = path;
     }
 
     /**

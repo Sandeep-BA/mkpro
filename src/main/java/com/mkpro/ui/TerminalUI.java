@@ -339,6 +339,14 @@ public class TerminalUI {
                                         boolean success = !response.contains("Error executing") && !response.contains("FAILED");
                                         var makerAction = context.getMakerLoop().onTurnComplete(agentUsed, toolsDetected, success, response);
                                         
+                                        // Record agent→tool usage for Layer 2 Markov
+                                        if (!toolsDetected.isEmpty() && context.getMarkovRouter() != null) {
+                                            com.mkpro.routing.IntentClassifier.TaskCategory cat = context.getMakerLoop().getCurrentGoal() != null
+                                                ? context.getMakerLoop().getCurrentGoal().getCategory()
+                                                : com.mkpro.routing.IntentClassifier.TaskCategory.GENERAL;
+                                            context.getMarkovRouter().recordToolUsage(agentUsed, cat, toolsDetected);
+                                        }
+
                                         // Reset for next turn
                                         com.mkpro.agents.AgentManager.lastDelegatedAgent = null;
                                         

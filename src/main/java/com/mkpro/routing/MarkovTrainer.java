@@ -212,7 +212,26 @@ public class MarkovTrainer {
                         }
                     }
 
+                    // Extract agents list
+                    java.util.List<String> agents = new java.util.ArrayList<>();
+                    if (root.has("agents") && root.get("agents").isArray()) {
+                        for (var node : root.get("agents")) {
+                            agents.add(node.asText());
+                        }
+                    }
+
                     router.recordCompletion(category, tools, success, turns);
+
+                    // Layer 2: Record agent→tool transitions
+                    // If single agent, attribute all tools to them
+                    // If multiple agents, attribute all tools to each (slight overcount, still valid signal)
+                    if (!tools.isEmpty() && !agents.isEmpty()) {
+                        java.util.Set<String> uniqueAgents = new java.util.LinkedHashSet<>(agents);
+                        for (String agent : uniqueAgents) {
+                            router.recordToolUsage(agent, category, tools);
+                        }
+                    }
+
                     count++;
                 } catch (Exception e) {
                     // Skip malformed lines

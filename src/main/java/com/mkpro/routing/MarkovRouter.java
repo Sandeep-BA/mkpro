@@ -33,6 +33,12 @@ public class MarkovRouter {
     private final Map<String, java.util.List<java.util.List<String>>> stallPatterns = new ConcurrentHashMap<>();
     private final Map<String, Integer> knowledgeStats = new ConcurrentHashMap<>();
 
+    // ═══ Layer 2: Agent → Tool transition probabilities ═══
+    // toolTransitions[agent][lastTool] = {nextTool → count}
+    private final Map<String, Map<String, Map<String, Integer>>> toolTransitions = new ConcurrentHashMap<>();
+    // agentToolFrequency[agent+":"+category] = {tool → count}
+    private final Map<String, Map<String, Integer>> agentToolFrequency = new ConcurrentHashMap<>();
+
     private double confidenceThreshold;
     private int totalObservations = 0;
 
@@ -243,48 +249,346 @@ public class MarkovRouter {
     /**
      * Save the transition matrix to disk.
      */
+    // ═══ Layer 2: Agent → Tool transition methods ═══
+
+    /**
+     * Record tool usage for an agent's turn.
+     * Updates both frequency (agent+category → tool) and transitions (agent → lastTool → nextTool).
+     *
+     * @param agent The agent that used the tools
+     * @param category The task category
+     * @param toolsUsed Ordered list of tools used in this turn
+     */
+    public void recordToolUsage(String agent, IntentClassifier.TaskCategory category, List<String> toolsUsed) {
+        if (agent == null || toolsUsed == null || toolsUsed.isEmpty()) return;
+
+        String freqKey = agent + ":" + category.name();
+
+        // Record frequency: how often this agent uses each tool for this category
+        Map<String, Integer> freq = agentToolFrequency.computeIfAbsent(freqKey, k -> new ConcurrentHashMap<>());
+        for (String tool : toolsUsed) {
+            freq.merge(tool, 1, Integer::sum);
+        }
+
+        // Record transitions: tool₁ → tool₂ sequences within this agent
+        Map<String, Map<String, Integer>> agentTransitions = 
+            toolTransitions.computeIfAbsent(agent, k -> new ConcurrentHashMap<>());
+
+        String lastTool = "_START_"; // Sentinel for first tool in sequence
+        for (String tool : toolsUsed) {
+            agentTransitions
+                .computeIfAbsent(lastTool, k -> new ConcurrentHashMap<>())
+                .merge(tool, 1, Integer::sum);
+            lastTool = tool;
+        }
+    }
+
+    /**
+     * Predict the next tool an agent will use given its last tool.
+     * 
+     * @return ToolPrediction with tool name and confidence, or null if no data
+     */
+    public ToolPrediction predictNextTool(String agent, String lastTool) {
+        if (agent == null) return null;
+        
+        Map<String, Map<String, Integer>> agentTrans = toolTransitions.get(agent);
+        if (agentTrans == null) return null;
+
+        String key = (lastTool == null || lastTool.isBlank()) ? "_START_" : lastTool;
+        Map<String, Integer> next = agentTrans.get(key);
+        if (next == null || next.isEmpty()) return null;
+
+        // Find highest probability transition
+        int total = next.values().stream().mapToInt(Integer::intValue).sum();
+        String bestTool = null;
+        int bestCount = 0;
+        for (Map.Entry<String, Integer> entry : next.entrySet()) {
+            if (entry.getValue() > bestCount) {
+                bestCount = entry.getValue();
+                bestTool = entry.getKey();
+            }
+        }
+
+        if (bestTool == null) return null;
+        return new ToolPrediction(bestTool, (double) bestCount / total);
+    }
+
+    /**
+     * Get expected tools for an agent+category, ranked by frequency.
+     * Used for stimulus enrichment ("You'll likely need: file_read, file_write, shell").
+     *
+     * @param agent The agent
+     * @param category The task category
+     * @param topK Max number of tools to return
+     * @return Ordered list of ToolPrediction (highest frequency first)
+     */
+    public List<ToolPrediction> getExpectedTools(String agent, IntentClassifier.TaskCategory category, int topK) {
+        if (agent == null || category == null) return Collections.emptyList();
+
+        String freqKey = agent + ":" + category.name();
+        Map<String, Integer> freq = agentToolFrequency.get(freqKey);
+        if (freq == null || freq.isEmpty()) return Collections.emptyList();
+
+        int total = freq.values().stream().mapToInt(Integer::intValue).sum();
+
+        List<ToolPrediction> predictions = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : freq.entrySet()) {
+            predictions.add(new ToolPrediction(entry.getKey(), (double) entry.getValue() / total));
+        }
+
+        predictions.sort((a, b) -> Double.compare(b.confidence, a.confidence));
+        return predictions.size() > topK ? predictions.subList(0, topK) : predictions;
+    }
+
+    /**
+     * Check if an agent's tool usage is anomalous for the given category.
+     * Returns true if the tool is not in the agent's typical toolset (< 5% frequency).
+     */
+    public boolean isAnomalousTool(String agent, IntentClassifier.TaskCategory category, String tool) {
+        if (agent == null || tool == null) return false;
+
+        String freqKey = agent + ":" + category.name();
+        Map<String, Integer> freq = agentToolFrequency.get(freqKey);
+        if (freq == null || freq.isEmpty()) return false; // No data → can't judge
+
+        int total = freq.values().stream().mapToInt(Integer::intValue).sum();
+        int toolCount = freq.getOrDefault(tool, 0);
+
+        // Anomalous if never seen or < 5% of total usage
+        return (double) toolCount / total < 0.05;
+    }
+
+    /**
+     * Tool prediction result.
+     */
+    public static class ToolPrediction {
+        public final String tool;
+        public final double confidence;
+
+        public ToolPrediction(String tool, double confidence) {
+            this.tool = tool;
+            this.confidence = confidence;
+        }
+
+        @Override
+        public String toString() {
+            return tool + " (" + (int)(confidence * 100) + "%)";
+        }
+    }
+
+    private static final byte[] MAGIC = "MKPRO_MARKOV".getBytes();
+    private static final int MODEL_VERSION = 4; // v1: transitions, v2: patterns, v3: stalls, v4: Layer 2
+
+    /**
+     * Save model to disk with corruption protection.
+     * Uses atomic write (tmp + rename) and CRC32 checksum.
+     */
     public void save(Path path) throws IOException {
-        try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(path))) {
+        Path tmpPath = path.resolveSibling(path.getFileName() + ".tmp");
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+            // Layer 1: Agent transitions
             oos.writeObject(new HashMap<>(transitions));
             oos.writeObject(new HashMap<>(categoryToAgent));
             oos.writeInt(totalObservations);
+
             // v2: learned patterns
             HashMap<String, java.util.Set<String>> serializablePatterns = new HashMap<>();
             for (var e : learnedPatterns.entrySet()) {
                 serializablePatterns.put(e.getKey(), new java.util.HashSet<>(e.getValue()));
             }
             oos.writeObject(serializablePatterns);
+
             // v3: stall patterns
             HashMap<String, java.util.List<java.util.List<String>>> serializableStalls = new HashMap<>();
             for (var e : stallPatterns.entrySet()) {
                 serializableStalls.put(e.getKey(), new java.util.ArrayList<>(e.getValue()));
             }
             oos.writeObject(serializableStalls);
+
+            // v4: Layer 2 — tool transitions and frequencies
+            HashMap<String, Map<String, Map<String, Integer>>> serializableToolTrans = new HashMap<>();
+            for (var e : toolTransitions.entrySet()) {
+                HashMap<String, Map<String, Integer>> inner = new HashMap<>();
+                for (var e2 : e.getValue().entrySet()) {
+                    inner.put(e2.getKey(), new HashMap<>(e2.getValue()));
+                }
+                serializableToolTrans.put(e.getKey(), inner);
+            }
+            oos.writeObject(serializableToolTrans);
+
+            HashMap<String, Map<String, Integer>> serializableToolFreq = new HashMap<>();
+            for (var e : agentToolFrequency.entrySet()) {
+                serializableToolFreq.put(e.getKey(), new HashMap<>(e.getValue()));
+            }
+            oos.writeObject(serializableToolFreq);
         }
+
+        byte[] data = baos.toByteArray();
+
+        // Compute CRC32 checksum
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(data);
+        long checksum = crc.getValue();
+
+        // Write: MAGIC + VERSION + DATA_LENGTH + DATA + CHECKSUM
+        try (java.io.DataOutputStream dos = new java.io.DataOutputStream(Files.newOutputStream(tmpPath))) {
+            dos.write(MAGIC);
+            dos.writeInt(MODEL_VERSION);
+            dos.writeInt(data.length);
+            dos.write(data);
+            dos.writeLong(checksum);
+        }
+
+        // Backup existing model before overwriting
+        if (Files.exists(path)) {
+            Path backupPath = path.resolveSibling(path.getFileName() + ".bak");
+            try { Files.copy(path, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING); } catch (Exception e) { /* best-effort */ }
+        }
+
+        // Atomic rename: tmp → target
+        Files.move(tmpPath, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
     }
 
     /**
-     * Load the transition matrix from disk.
+     * Load model from disk with corruption detection.
+     * Validates magic header, version, and CRC32 checksum.
+     * If corrupt, falls back to backup or starts fresh.
      */
     @SuppressWarnings("unchecked")
     public void load(Path path) throws IOException, ClassNotFoundException {
         if (!Files.exists(path)) return;
+
+        byte[] fileBytes = Files.readAllBytes(path);
+
+        // Validate magic header
+        if (fileBytes.length < MAGIC.length + 4 + 4 + 8) {
+            System.err.println("[MarkovRouter] Model file too small, attempting backup...");
+            loadBackup(path);
+            return;
+        }
+
+        for (int i = 0; i < MAGIC.length; i++) {
+            if (fileBytes[i] != MAGIC[i]) {
+                // Not a v4+ model — try legacy load
+                loadLegacy(path);
+                return;
+            }
+        }
+
+        java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.ByteArrayInputStream(fileBytes));
+        dis.skipBytes(MAGIC.length); // skip magic
+        int version = dis.readInt();
+        int dataLength = dis.readInt();
+
+        if (dataLength < 0 || MAGIC.length + 4 + 4 + dataLength + 8 > fileBytes.length) {
+            System.err.println("[MarkovRouter] Model file corrupt (bad data length), attempting backup...");
+            loadBackup(path);
+            return;
+        }
+
+        byte[] data = new byte[dataLength];
+        dis.readFully(data);
+        long storedChecksum = dis.readLong();
+
+        // Validate checksum
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(data);
+        if (crc.getValue() != storedChecksum) {
+            System.err.println("[MarkovRouter] Model file checksum mismatch, attempting backup...");
+            loadBackup(path);
+            return;
+        }
+
+        // Deserialize data
+        try (ObjectInputStream ois = new ObjectInputStream(new java.io.ByteArrayInputStream(data))) {
+            // Layer 1
+            Map<String, Map<String, Map<String, Integer>>> loaded = (Map<String, Map<String, Map<String, Integer>>>) ois.readObject();
+            transitions.putAll(loaded);
+            Map<String, Map<String, Integer>> loadedCat = (Map<String, Map<String, Integer>>) ois.readObject();
+            categoryToAgent.putAll(loadedCat);
+            totalObservations = ois.readInt();
+
+            // v2: learned patterns
+            if (version >= 2) {
+                try {
+                    Map<String, java.util.Set<String>> loadedPatterns = (Map<String, java.util.Set<String>>) ois.readObject();
+                    if (loadedPatterns != null) learnedPatterns.putAll(loadedPatterns);
+                } catch (Exception e) { /* OK */ }
+            }
+
+            // v3: stall patterns
+            if (version >= 3) {
+                try {
+                    Map<String, java.util.List<java.util.List<String>>> loadedStalls = (Map<String, java.util.List<java.util.List<String>>>) ois.readObject();
+                    if (loadedStalls != null) stallPatterns.putAll(loadedStalls);
+                } catch (Exception e) { /* OK */ }
+            }
+
+            // v4: Layer 2 — tool transitions and frequencies
+            if (version >= 4) {
+                try {
+                    Map<String, Map<String, Map<String, Integer>>> loadedToolTrans = (Map<String, Map<String, Map<String, Integer>>>) ois.readObject();
+                    if (loadedToolTrans != null) {
+                        for (var e : loadedToolTrans.entrySet()) {
+                            Map<String, Map<String, Integer>> inner = toolTransitions.computeIfAbsent(e.getKey(), k -> new ConcurrentHashMap<>());
+                            for (var e2 : e.getValue().entrySet()) {
+                                inner.put(e2.getKey(), new ConcurrentHashMap<>(e2.getValue()));
+                            }
+                        }
+                    }
+                    Map<String, Map<String, Integer>> loadedToolFreq = (Map<String, Map<String, Integer>>) ois.readObject();
+                    if (loadedToolFreq != null) {
+                        for (var e : loadedToolFreq.entrySet()) {
+                            agentToolFrequency.put(e.getKey(), new ConcurrentHashMap<>(e.getValue()));
+                        }
+                    }
+                } catch (Exception e) { /* OK — v3 model without Layer 2 */ }
+            }
+        }
+    }
+
+    /**
+     * Load from backup file (.bak) if primary is corrupt.
+     */
+    private void loadBackup(Path primaryPath) {
+        Path backupPath = primaryPath.resolveSibling(primaryPath.getFileName() + ".bak");
+        if (Files.exists(backupPath)) {
+            System.err.println("[MarkovRouter] Loading from backup: " + backupPath);
+            try {
+                // Copy backup to primary (will be re-saved with new format on exit)
+                Files.copy(backupPath, primaryPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                loadLegacy(primaryPath);
+            } catch (Exception e) {
+                System.err.println("[MarkovRouter] Backup also corrupt. Starting fresh.");
+            }
+        } else {
+            System.err.println("[MarkovRouter] No backup available. Starting fresh.");
+        }
+    }
+
+    /**
+     * Legacy load (pre-v4 format without magic header).
+     */
+    @SuppressWarnings("unchecked")
+    private void loadLegacy(Path path) throws IOException {
         try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(path))) {
             Map<String, Map<String, Map<String, Integer>>> loaded = (Map<String, Map<String, Map<String, Integer>>>) ois.readObject();
             transitions.putAll(loaded);
             Map<String, Map<String, Integer>> loadedCat = (Map<String, Map<String, Integer>>) ois.readObject();
             categoryToAgent.putAll(loadedCat);
             totalObservations = ois.readInt();
-            // v2: try reading learned patterns (may not exist in old models)
             try {
                 Map<String, java.util.Set<String>> loadedPatterns = (Map<String, java.util.Set<String>>) ois.readObject();
                 if (loadedPatterns != null) learnedPatterns.putAll(loadedPatterns);
-            } catch (Exception e) { /* Old model without patterns */ }
-            // v3: try reading stall patterns
+            } catch (Exception e) { /* OK */ }
             try {
                 Map<String, java.util.List<java.util.List<String>>> loadedStalls = (Map<String, java.util.List<java.util.List<String>>>) ois.readObject();
                 if (loadedStalls != null) stallPatterns.putAll(loadedStalls);
-            } catch (Exception e) { /* Old model without stall data */ }
+            } catch (Exception e) { /* OK */ }
+        } catch (ClassNotFoundException e) {
+            System.err.println("[MarkovRouter] Legacy model class not found: " + e.getMessage());
         }
     }
 
@@ -323,6 +627,13 @@ public class MarkovRouter {
      */
     public Map<String, Map<String, Map<String, Integer>>> getTransitionMatrix() {
         return Collections.unmodifiableMap(transitions);
+    }
+
+    /**
+     * Get the agent→tool frequency map for display (Layer 2 stats).
+     */
+    public Map<String, Map<String, Integer>> getAgentToolFrequency() {
+        return Collections.unmodifiableMap(agentToolFrequency);
     }
 
     // ==========================================================================

@@ -42,6 +42,7 @@ public class MakerState {
     private int knowledgeRetries = 0;        // Times we retried after acquiring knowledge
     private int knowledgeRetrySuccesses = 0; // Times retry-after-knowledge succeeded
     private boolean preGoalKnowledgeUsed = false;
+    private boolean anomalousToolDetected = false;
 
     public MakerState(String goalDescription, IntentClassifier.TaskCategory category) {
         this(goalDescription, category, 3);
@@ -109,6 +110,17 @@ public class MakerState {
         if (nextPrediction.confidence > 0.5) {
             sb.append("Predicted next: ").append(nextPrediction.agent)
               .append(" (").append((int)(nextPrediction.confidence * 100)).append("% confidence)\n");
+            
+            // Layer 2: Expected tools for predicted agent
+            List<MarkovRouter.ToolPrediction> expectedTools = router.getExpectedTools(nextPrediction.agent, category, 3);
+            if (!expectedTools.isEmpty()) {
+                sb.append("Expected tools: ");
+                for (int i = 0; i < expectedTools.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(expectedTools.get(i).toString());
+                }
+                sb.append("\n");
+            }
         }
 
         // Completion estimate
@@ -165,4 +177,6 @@ public class MakerState {
     public void incrementKnowledgeRetrySuccesses() { knowledgeRetrySuccesses++; }
     public boolean isPreGoalKnowledgeUsed() { return preGoalKnowledgeUsed; }
     public void setPreGoalKnowledgeUsed(boolean used) { this.preGoalKnowledgeUsed = used; }
+    public boolean isAnomalousToolDetected() { return anomalousToolDetected; }
+    public void setAnomalousToolDetected(boolean detected) { this.anomalousToolDetected = detected; }
 }

@@ -78,6 +78,9 @@ public class MkPro {
             // Wire event bus to MakerLoop
             if (context.getMakerLoop() != null) {
                 context.getMakerLoop().setEventBus(eventBus);
+                // Set model save path for periodic saves
+                java.nio.file.Path modelPath = com.mkpro.utils.PathUtils.getProjectPath().resolve(".mkpro").resolve("markov_model.dat");
+                context.getMakerLoop().setModelSavePath(modelPath);
                 // Wire knowledge components for proactive gap detection
                 if (context.getKnowledgeScheduler() != null) {
                     context.getMakerLoop().setKnowledgeComponents(
@@ -421,6 +424,31 @@ public class MkPro {
                             loggedResponse = ">> Delegating to " + delegated + "...\n" + loggedResponse;
                         }
                         context.getActionLogger().log("Coordinator", loggedResponse);
+
+                        // Maker: observe turn result + record tool usage
+                        if (context.getMakerEnabled() != null && context.getMakerEnabled().get() && context.getMakerLoop() != null) {
+                            String agentUsed = delegated != null ? delegated : "Coordinator";
+                            String response = responseBuilder.toString();
+                            java.util.List<String> toolsDetected = new java.util.ArrayList<>();
+                            if (response.contains("[Shell]") || response.contains("run_shell")) toolsDetected.add("shell");
+                            if (response.contains("file_write") || response.contains("Saved") || response.contains("saved")) toolsDetected.add("file_write");
+                            if (response.contains("file_read") || response.contains("[VectorSearch]")) toolsDetected.add("file_read");
+                            if (response.contains("[FetchURL]")) toolsDetected.add("fetch_url");
+                            if (response.contains("[Memory]")) toolsDetected.add("central_memory");
+                            if (response.contains("[Index]")) toolsDetected.add("index_codebase");
+
+                            boolean success = !response.contains("Error executing") && !response.contains("FAILED");
+                            context.getMakerLoop().onTurnComplete(agentUsed, toolsDetected, success, response);
+
+                            // Layer 2: record agent→tool transitions
+                            if (!toolsDetected.isEmpty() && context.getMarkovRouter() != null) {
+                                com.mkpro.routing.IntentClassifier.TaskCategory cat = context.getMakerLoop().getCurrentGoal() != null
+                                    ? context.getMakerLoop().getCurrentGoal().getCategory()
+                                    : com.mkpro.routing.IntentClassifier.TaskCategory.GENERAL;
+                                context.getMarkovRouter().recordToolUsage(agentUsed, cat, toolsDetected);
+                            }
+                        }
+
                         com.mkpro.agents.AgentManager.lastDelegatedAgent = null;
                     }
                 });

@@ -181,6 +181,34 @@ public class TrainCommand implements Command {
             }
         }
         
+        // Layer 2: Agent → Tool frequencies
+        var toolFreqs = router.getAgentToolFrequency();
+        if (!toolFreqs.isEmpty()) {
+            System.out.println("\n  " + ANSI_CYAN + "Agent → Tool Frequencies (Layer 2):" + ANSI_RESET);
+            for (var entry : toolFreqs.entrySet()) {
+                String key = entry.getKey(); // "Agent:CATEGORY"
+                var tools = entry.getValue();
+                int total = tools.values().stream().mapToInt(Integer::intValue).sum();
+                
+                // Sort by count descending
+                java.util.List<java.util.Map.Entry<String, Integer>> sorted = new java.util.ArrayList<>(tools.entrySet());
+                sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+                
+                StringBuilder sb = new StringBuilder();
+                sb.append("    ").append(String.format("%-20s", key)).append(" → ");
+                int shown = 0;
+                for (var t : sorted) {
+                    if (shown >= 4) break;
+                    int pct = total > 0 ? (t.getValue() * 100 / total) : 0;
+                    if (shown > 0) sb.append(", ");
+                    sb.append(t.getKey()).append("(").append(pct).append("%)");
+                    shown++;
+                }
+                sb.append("  [").append(total).append(" samples]");
+                System.out.println(sb.toString());
+            }
+        }
+
         System.out.println();
     }
 
