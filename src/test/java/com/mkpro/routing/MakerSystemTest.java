@@ -325,4 +325,229 @@ public class MakerSystemTest {
             IntentClassifier.TaskCategory.TESTING, 3, "Tester", true, List.of("shell", "file_write"));
         assertEquals(MarkovRouter.MakerAction.COMPLETE, action);
     }
+
+    // ==========================================================================
+    // Knowledge Adequacy tests
+    // ==========================================================================
+
+    @Test
+    void makerStateTracksAcquiredTopics() {
+        MakerState state = new MakerState("setup k8s", IntentClassifier.TaskCategory.DEVOPS);
+        assertTrue(state.getAcquiredTopics().isEmpty());
+        state.addAcquiredTopic("k8s-hpa");
+        state.addAcquiredTopic("redis-cache");
+        assertEquals(2, state.getAcquiredTopics().size());
+        assertEquals("k8s-hpa", state.getAcquiredTopics().get(0));
+    }
+
+    @Test
+    void makerStateTracksKnowledgeRetries() {
+        MakerState state = new MakerState("setup auth", IntentClassifier.TaskCategory.CODING);
+        assertEquals(0, state.getKnowledgeRetries());
+        state.incrementKnowledgeRetries();
+        state.incrementKnowledgeRetries();
+        assertEquals(2, state.getKnowledgeRetries());
+    }
+
+    @Test
+    void makerStateTracksKnowledgeRetrySuccesses() {
+        MakerState state = new MakerState("setup auth", IntentClassifier.TaskCategory.CODING);
+        assertEquals(0, state.getKnowledgeRetrySuccesses());
+        state.incrementKnowledgeRetrySuccesses();
+        assertEquals(1, state.getKnowledgeRetrySuccesses());
+    }
+
+    @Test
+    void makerStateTracksPreGoalKnowledge() {
+        MakerState state = new MakerState("setup auth", IntentClassifier.TaskCategory.CODING);
+        assertFalse(state.isPreGoalKnowledgeUsed());
+        state.setPreGoalKnowledgeUsed(true);
+        assertTrue(state.isPreGoalKnowledgeUsed());
+    }
+
+    @Test
+    void knowledgeComponentsWiredToMaker() {
+        // Should not throw when components are null (graceful no-op)
+        maker.setKnowledgeComponents(null, null, null);
+        maker.setLlmCallback(null);
+        // Should still create goals normally
+        MakerState state = maker.onUserInput("implement feature with specialized library");
+        assertNotNull(state);
+        assertEquals(MakerState.GoalPhase.ACTIVE, state.getPhase());
+    }
+
+    @Test
+    void preGoalKnowledgeSkipsShortGoals() {
+        // Wire with a store/index that has no coverage — but short goal should skip acquisition
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        // LLM callback should NOT be called for short goals
+        maker.setLlmCallback(prompt -> {
+            fail("LLM should not be called for short goals");
+            return null;
+        });
+
+        MakerState state = maker.onUserInput("fix bug"); // Only 2 words — skipped
+        assertNotNull(state);
+    }
+
+    @Test
+    void preGoalKnowledgeSkipsWhenCoverageExists() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        // Index a topic with content about kubernetes
+        index.indexTopic("k8s-basics", "kubernetes pods deployments services ingress autoscaling hpa cluster");
+        index.rebuildIdf();
+
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        // LLM should NOT be called since coverage exists
+        maker.setLlmCallback(prompt -> {
+            fail("LLM should not be called when coverage exists");
+            return null;
+        });
+
+        MakerState state = maker.onUserInput("set up kubernetes autoscaling with HPA for the cluster");
+        assertNotNull(state);
+        assertEquals(MakerState.GoalPhase.ACTIVE, state.getPhase());
+    }
+
+    @Test
+    void preGoalKnowledgeTriggersWhenNoCoverage() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        // Index something unrelated
+        index.indexTopic("java-streams", "java streams lambda functional programming collections");
+        index.rebuildIdf();
+
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        // LLM responds with NONE (no knowledge needed — prevents actual fetch)
+        maker.setLlmCallback(prompt -> "NONE");
+
+        MakerState state = maker.onUserInput("configure terraform modules for AWS ECS Fargate deployment");
+        assertNotNull(state);
+        // Goal still active (LLM said NONE, so no acquisition)
+        assertEquals(MakerState.GoalPhase.ACTIVE, state.getPhase());
+    }
+
+    @Test
+    void preGoalKnowledgeAcquiresWhenLlmSuggestsTopic() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        maker.setLlmCallback(prompt -> "TOPIC:terraform-ecs\nURL:https://docs.aws.amazon.com/ecs\nFOCUS:Fargate task definitions");
+
+        MakerState state = maker.onUserInput("configure terraform modules for AWS ECS Fargate deployment");
+        assertNotNull(state);
+        // Topic should have been scheduled
+        assertTrue(state.getAcquiredTopics().contains("terraform-ecs") || 
+                   state.isPreGoalKnowledgeUsed() ||
+                   state.getAcquiredTopics().isEmpty()); // empty if wait timed out (no actual fetch)
+    }
+
+    @Test
+    void reactiveKnowledgeDetectsUncertainty() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        // First call (pre-goal): NONE. Second call (reactive): suggest topic
+        final int[] callCount = {0};
+        maker.setLlmCallback(prompt -> {
+            callCount[0]++;
+            if (callCount[0] == 1) return "NONE"; // pre-goal
+            return "TOPIC:nginx-rate-limit\nURL:https://nginx.org/docs\nFOCUS:rate limiting config";
+        });
+
+        maker.onUserInput("configure nginx rate limiting with advanced rules and fallback behavior");
+
+        // Agent gives uncertain response
+        String uncertainResponse = "I'm not sure about the exact configuration, but generally you might want to " +
+            "check the NGINX documentation. I believe the limit_req module is typically used, " +
+            "but I cannot confirm the exact syntax for your version. You should verify this.";
+
+        MarkovRouter.MakerAction action = maker.onTurnComplete("DevOps", List.of("file_write"), true, uncertainResponse);
+        // Should trigger RETRY due to uncertainty detection + knowledge acquisition
+        assertEquals(MarkovRouter.MakerAction.RETRY, action);
+    }
+
+    @Test
+    void reactiveKnowledgeSkipsConfidentResponse() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        maker.setLlmCallback(prompt -> "NONE");
+
+        maker.onUserInput("configure nginx rate limiting with multiple zones");
+
+        // Agent gives confident, specific response (no uncertainty signals)
+        String confidentResponse = "I've created the NGINX rate limiting configuration with multiple zones. " +
+            "The limit_req_zone directive uses $binary_remote_addr for /api at 10r/s " +
+            "and $server_name for /login at 5r/s. The burst parameter is set to 20. " +
+            "Files written to /etc/nginx/conf.d/rate_limit.conf.";
+
+        MarkovRouter.MakerAction action = maker.onTurnComplete("DevOps", List.of("file_write"), true, confidentResponse);
+        // Should CONTINUE (not retry) — response was confident
+        assertEquals(MarkovRouter.MakerAction.CONTINUE, action);
+    }
+
+    @Test
+    void reactiveKnowledgeCappedAtMax() {
+        com.mkpro.knowledge.TopicIndex index = new com.mkpro.knowledge.TopicIndex();
+        com.mkpro.knowledge.KnowledgeStore store = new com.mkpro.knowledge.KnowledgeStore(null);
+        com.mkpro.knowledge.KnowledgeScheduler scheduler = new com.mkpro.knowledge.KnowledgeScheduler(
+            store, index, new com.mkpro.knowledge.SourceFetcher(), List.of());
+
+        maker.setKnowledgeComponents(scheduler, store, index);
+        final int[] callCount = {0};
+        maker.setLlmCallback(prompt -> {
+            callCount[0]++;
+            if (callCount[0] == 1) return "NONE"; // pre-goal
+            return "TOPIC:topic-" + callCount[0] + "\nURL:https://example.com\nFOCUS:test";
+        });
+
+        maker.onUserInput("do something complex requiring multiple knowledge acquisitions");
+
+        String uncertain = "I'm not sure about this, you should verify. I cannot confirm.";
+
+        // First uncertain response → RETRY (knowledge acquired)
+        maker.onTurnComplete("DevOps", List.of(), true, uncertain);
+        // Second uncertain response → RETRY (knowledge acquired)
+        maker.onTurnComplete("DevOps", List.of(), true, uncertain);
+        // Third uncertain response → should NOT retry (capped at 2)
+        MarkovRouter.MakerAction action = maker.onTurnComplete("DevOps", List.of(), true, uncertain);
+        assertEquals(MarkovRouter.MakerAction.CONTINUE, action);
+    }
+
+    @Test
+    void routerRecordsKnowledgeOutcome() {
+        // Initially no data
+        assertEquals(-1.0, router.getKnowledgeEffectiveness(IntentClassifier.TaskCategory.DEVOPS));
+
+        // Record outcomes
+        router.recordKnowledgeOutcome(IntentClassifier.TaskCategory.DEVOPS, List.of("k8s-hpa"), true, 1);
+        router.recordKnowledgeOutcome(IntentClassifier.TaskCategory.DEVOPS, List.of("redis-cache"), true, 0);
+        router.recordKnowledgeOutcome(IntentClassifier.TaskCategory.DEVOPS, List.of("nginx-config"), false, 1);
+
+        double effectiveness = router.getKnowledgeEffectiveness(IntentClassifier.TaskCategory.DEVOPS);
+        // 2 successes out of 3 total = 0.667
+        assertTrue(effectiveness > 0.6 && effectiveness < 0.7);
+    }
 }

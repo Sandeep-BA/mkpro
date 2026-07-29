@@ -37,6 +37,12 @@ public class MakerState {
     private final long startedAt;
     private long lastActivityAt;
 
+    // Knowledge adequacy tracking
+    private final List<String> acquiredTopics = new ArrayList<>();
+    private int knowledgeRetries = 0;        // Times we retried after acquiring knowledge
+    private int knowledgeRetrySuccesses = 0; // Times retry-after-knowledge succeeded
+    private boolean preGoalKnowledgeUsed = false;
+
     public MakerState(String goalDescription, IntentClassifier.TaskCategory category) {
         this(goalDescription, category, 3);
     }
@@ -149,4 +155,14 @@ public class MakerState {
     public void incrementRedirectCount() { redirectCount++; }
     public String getRedirectTarget() { return redirectTarget; }
     public void setRedirectTarget(String target) { this.redirectTarget = target; }
+
+    // Knowledge adequacy tracking
+    public List<String> getAcquiredTopics() { return acquiredTopics; }
+    public void addAcquiredTopic(String topic) { acquiredTopics.add(topic); }
+    public int getKnowledgeRetries() { return knowledgeRetries; }
+    public void incrementKnowledgeRetries() { knowledgeRetries++; }
+    public int getKnowledgeRetrySuccesses() { return knowledgeRetrySuccesses; }
+    public void incrementKnowledgeRetrySuccesses() { knowledgeRetrySuccesses++; }
+    public boolean isPreGoalKnowledgeUsed() { return preGoalKnowledgeUsed; }
+    public void setPreGoalKnowledgeUsed(boolean used) { this.preGoalKnowledgeUsed = used; }
 }

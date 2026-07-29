@@ -31,6 +31,7 @@ public class MarkovRouter {
     
     // Stall patterns: sequences that historically led to escalation (category → list of agent sequences)
     private final Map<String, java.util.List<java.util.List<String>>> stallPatterns = new ConcurrentHashMap<>();
+    private final Map<String, Integer> knowledgeStats = new ConcurrentHashMap<>();
 
     private double confidenceThreshold;
     private int totalObservations = 0;
@@ -213,6 +214,30 @@ public class MarkovRouter {
             }
         }
         return (double) matched / matchLen;
+    }
+
+    /**
+     * Record knowledge acquisition outcome for a goal category.
+     * Used by MakerLoop's retrospective analysis to track which categories benefit from knowledge.
+     */
+    public void recordKnowledgeOutcome(IntentClassifier.TaskCategory category, java.util.List<String> topics, boolean success, int retries) {
+        // Store as a lightweight stat: category → success rate with knowledge
+        String key = "knowledge:" + category.name();
+        knowledgeStats.merge(key + ":total", 1, Integer::sum);
+        if (success) knowledgeStats.merge(key + ":success", 1, Integer::sum);
+        if (retries > 0) knowledgeStats.merge(key + ":retries", retries, Integer::sum);
+    }
+
+    /**
+     * Get knowledge effectiveness for a category.
+     * @return success rate (0.0–1.0), or -1 if no data
+     */
+    public double getKnowledgeEffectiveness(IntentClassifier.TaskCategory category) {
+        String key = "knowledge:" + category.name();
+        int total = knowledgeStats.getOrDefault(key + ":total", 0);
+        if (total == 0) return -1.0;
+        int successes = knowledgeStats.getOrDefault(key + ":success", 0);
+        return (double) successes / total;
     }
 
     /**

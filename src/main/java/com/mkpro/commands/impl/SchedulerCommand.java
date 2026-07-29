@@ -143,6 +143,34 @@ public class SchedulerCommand implements Command {
             // Wire MakerLoop for proactive knowledge gap detection
             if (context.getMakerLoop() != null) {
                 context.getMakerLoop().setKnowledgeComponents(scheduler, store, index);
+                // Wire LLM callback for knowledge suggestions
+                final com.mkpro.core.MkProContext ctx2 = context;
+                context.getMakerLoop().setLlmCallback(prompt -> {
+                    try {
+                        if (ctx2.getRunner() == null || ctx2.getCurrentSession() == null) return null;
+                        com.mkpro.knowledge.RequestKnowledgeTool.enterSchedulerContext();
+                        try {
+                            com.google.genai.types.Content msg = com.google.genai.types.Content.fromParts(
+                                new com.google.genai.types.Part[]{com.google.genai.types.Part.fromText(prompt)});
+                            StringBuilder resp = new StringBuilder();
+                            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                            ctx2.getRunner().runAsync(ctx2.getCurrentSession().sessionKey(), msg)
+                                .blockingSubscribe(
+                                    event -> event.content().ifPresent(c -> c.parts().ifPresent(parts -> {
+                                        for (com.google.genai.types.Part part : parts) {
+                                            part.text().ifPresent(resp::append);
+                                        }
+                                    })),
+                                    error -> latch.countDown(),
+                                    latch::countDown
+                                );
+                            latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                            return resp.toString().trim().isEmpty() ? null : resp.toString().trim();
+                        } finally {
+                            com.mkpro.knowledge.RequestKnowledgeTool.exitSchedulerContext();
+                        }
+                    } catch (Exception e) { return null; }
+                });
             }
 
             if (!topics.isEmpty()) {
