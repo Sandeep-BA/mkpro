@@ -95,6 +95,16 @@ public class BootstrapService {
                 }
             } catch (Exception e) { /* Silent */ }
 
+            // Auto-export Maker goal sequences (agents, tools, success, turns) for completion training
+            try {
+                if (context.getMakerLoop() != null) {
+                    java.nio.file.Path dataDir = com.mkpro.utils.PathUtils.getProjectPath().resolve("datajsonl");
+                    java.nio.file.Files.createDirectories(dataDir);
+                    java.nio.file.Path seqFile = dataDir.resolve("maker_sequences.jsonl");
+                    exportMakerSequences(context.getMakerLoop(), seqFile);
+                }
+            } catch (Exception e) { /* Silent */ }
+
             if (context.getDiscoveryService() != null) {
                 context.getDiscoveryService().stop();
             }
@@ -701,6 +711,57 @@ public class BootstrapService {
      * Quick export of session logs to JSONL for Markov training.
      * Extracts USER→agent response pairs from ActionLogger entries.
      */
+    /**
+     * Append Maker goal sequences to maker_sequences.jsonl for future training.
+     * Format: {"category":"CODING","agents":["Architect","Coder"],"tools":["file_read","file_write"],"turns":3,"success":true,"knowledge":["k8s-hpa"]}
+     */
+    private static void exportMakerSequences(com.mkpro.routing.MakerLoop makerLoop, java.nio.file.Path outputFile) {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        int exported = 0;
+
+        try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(outputFile,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)) {
+
+            for (com.mkpro.routing.MakerState goal : makerLoop.getAllGoals()) {
+                // Only export goals that actually had turns (not trivial questions)
+                if (goal.getTurnCount() < 1) continue;
+
+                com.fasterxml.jackson.databind.node.ObjectNode node = mapper.createObjectNode();
+                node.put("category", goal.getCategory().name());
+
+                com.fasterxml.jackson.databind.node.ArrayNode agents = mapper.createArrayNode();
+                for (String agent : goal.getAgentSequence()) agents.add(agent);
+                node.set("agents", agents);
+
+                com.fasterxml.jackson.databind.node.ArrayNode tools = mapper.createArrayNode();
+                for (String tool : goal.getToolSequence()) tools.add(tool);
+                node.set("tools", tools);
+
+                node.put("turns", goal.getTurnCount());
+                node.put("success", goal.getPhase() == com.mkpro.routing.MakerState.GoalPhase.DONE);
+
+                // Include knowledge acquisition data if any
+                if (!goal.getAcquiredTopics().isEmpty()) {
+                    com.fasterxml.jackson.databind.node.ArrayNode knowledge = mapper.createArrayNode();
+                    for (String topic : goal.getAcquiredTopics()) knowledge.add(topic);
+                    node.set("knowledge", knowledge);
+                    node.put("knowledge_retries", goal.getKnowledgeRetries());
+                    node.put("knowledge_retry_successes", goal.getKnowledgeRetrySuccesses());
+                }
+
+                writer.write(mapper.writeValueAsString(node));
+                writer.newLine();
+                exported++;
+            }
+        } catch (Exception e) {
+            // Silent — don't block shutdown
+        }
+
+        if (exported > 0) {
+            System.out.println("  Exported " + exported + " Maker sequence(s) to datajsonl/maker_sequences.jsonl");
+        }
+    }
+
     private static void exportSessionLogs(java.util.List<String> logs, java.nio.file.Path outputFile) {
         try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(outputFile)) {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();

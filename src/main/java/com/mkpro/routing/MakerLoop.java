@@ -546,6 +546,13 @@ public class MakerLoop {
     public void setMaxRetries(int r) { this.maxRetries = r; }
 
     /**
+     * Get all goals from this session (for export).
+     */
+    public java.util.Collection<MakerState> getAllGoals() {
+        return activeGoals.values();
+    }
+
+    /**
      * Backward-compatible overload without response text.
      */
     public MarkovRouter.MakerAction onTurnComplete(String agentUsed, List<String> toolsInvoked, boolean success) {
@@ -692,14 +699,24 @@ public class MakerLoop {
      */
     private void checkAndAcquireKnowledge(String goalText) {
         // Guard: need all components + non-trivial goal
-        if (knowledgeScheduler == null || topicIndex == null || llmCallback == null) return;
+        if (knowledgeScheduler == null || topicIndex == null || llmCallback == null) {
+            if (knowledgeScheduler == null) System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: scheduler not wired" + ANSI_RESET);
+            else if (topicIndex == null) System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: topicIndex not wired" + ANSI_RESET);
+            else System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: llmCallback not wired" + ANSI_RESET);
+            return;
+        }
         if (goalText == null || goalText.split("\\s+").length < 4) return;
 
         try {
             // Check existing coverage
             List<com.mkpro.knowledge.TopicIndex.SearchResult> results = topicIndex.search(goalText, 3);
             if (!results.isEmpty() && results.get(0).getScore() > 0.3) {
-                // Already have relevant knowledge
+                // Already have relevant knowledge — log it
+                String topicName = results.get(0).getTopicName();
+                int score = (int)(results.get(0).getScore() * 100);
+                String msg = "Knowledge adequate: " + topicName + " (score: " + score + "%) — skipping acquisition";
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
+                else System.out.println(ANSI_GREEN + "  [Maker] " + msg + ANSI_RESET);
                 return;
             }
 
@@ -710,7 +727,13 @@ public class MakerLoop {
 
             // Parse suggestion
             com.mkpro.knowledge.TopicConfig topic = parseKnowledgeSuggestion(response);
-            if (topic == null) return;
+            if (topic == null) {
+                // LLM said NONE or unparseable — no external knowledge needed
+                String msg = "Knowledge check: no external docs needed for this goal";
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
+                else System.out.println(ANSI_GREEN + "  [Maker] " + msg + ANSI_RESET);
+                return;
+            }
 
             // Schedule acquisition
             boolean added = knowledgeScheduler.addTopic(topic);
