@@ -19,6 +19,7 @@ import static com.mkpro.MkPro.*;
 public class TerminalUI {
     private final MkProContext context;
     private final CommandRegistry registry;
+    private volatile com.mkpro.knowledge.StreamKnowledgeMonitor streamKnowledgeMonitor;
 
     private static final DateTimeFormatter PROMPT_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
 
@@ -232,6 +233,48 @@ public class TerminalUI {
                             final String finalLine = line;
                             long[] tokens = {0, 0, 0};
                             long startTime = System.currentTimeMillis();
+                            
+                            // Initialize/reset stream knowledge monitor
+                            if (context.getKnowledgeScheduler() != null && context.getTopicIndex() != null) {
+                                if (streamKnowledgeMonitor == null) {
+                                    // Lazily create with LLM callback from MakerLoop
+                                    java.util.function.Function<String, String> llmCb = null;
+                                    if (context.getMakerLoop() != null) {
+                                        // Reuse the Maker's llmCallback approach
+                                        final com.mkpro.core.MkProContext ctx = context;
+                                        llmCb = prompt -> {
+                                            try {
+                                                if (ctx.getRunner() == null || ctx.getCurrentSession() == null) return null;
+                                                com.mkpro.knowledge.RequestKnowledgeTool.enterSchedulerContext();
+                                                try {
+                                                    com.google.genai.types.Content msg = com.google.genai.types.Content.fromParts(
+                                                        new com.google.genai.types.Part[]{com.google.genai.types.Part.fromText(prompt)});
+                                                    StringBuilder resp = new StringBuilder();
+                                                    java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                                                    ctx.getRunner().runAsync(ctx.getCurrentSession().sessionKey(), msg)
+                                                        .blockingSubscribe(
+                                                            event -> event.content().ifPresent(c -> c.parts().ifPresent(parts -> {
+                                                                for (com.google.genai.types.Part part : parts) {
+                                                                    part.text().ifPresent(resp::append);
+                                                                }
+                                                            })),
+                                                            error -> latch.countDown(),
+                                                            latch::countDown
+                                                        );
+                                                    latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                                                    return resp.toString().trim().isEmpty() ? null : resp.toString().trim();
+                                                } finally {
+                                                    com.mkpro.knowledge.RequestKnowledgeTool.exitSchedulerContext();
+                                                }
+                                            } catch (Exception e) { return null; }
+                                        };
+                                    }
+                                    streamKnowledgeMonitor = new com.mkpro.knowledge.StreamKnowledgeMonitor(
+                                        context.getKnowledgeScheduler(), context.getTopicIndex(), llmCb);
+                                } else {
+                                    streamKnowledgeMonitor.reset();
+                                }
+                            }
                             StringBuilder responseBuilder = new StringBuilder();
 
                             context.getRunner().runAsync(context.getCurrentSession().sessionKey(), message)
@@ -263,6 +306,10 @@ public class TerminalUI {
                                                     responseBuilder.append(text);
                                                     System.out.print(text);
                                                     System.out.flush();
+                                                    // Stream knowledge monitor: feed chunk
+                                                    if (streamKnowledgeMonitor != null) {
+                                                        streamKnowledgeMonitor.onChunk(text);
+                                                    }
                                                     // Web: stream chunk via event bus
                                                     if (context.getEventBus() != null) {
                                                         context.getEventBus().emit(com.mkpro.events.MkProEvent.streamChunk(text));
@@ -294,6 +341,11 @@ public class TerminalUI {
                                     // Web: stream end via event bus
                                     if (context.getEventBus() != null) {
                                         context.getEventBus().emit(com.mkpro.events.MkProEvent.streamEnd());
+                                    }
+                                    
+                                    // Stream knowledge monitor: end of stream
+                                    if (streamKnowledgeMonitor != null) {
+                                        streamKnowledgeMonitor.onStreamEnd();
                                     }
                                     
                                     String sessId = context.getCurrentSession() != null ? context.getCurrentSession().id() : "default-session";

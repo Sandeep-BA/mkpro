@@ -384,6 +384,15 @@ public class MkPro {
             StringBuilder responseBuilder = new StringBuilder();
             java.util.concurrent.atomic.AtomicBoolean firstChunk = new java.util.concurrent.atomic.AtomicBoolean(false);
 
+            // Stream knowledge monitor for web path
+            final com.mkpro.knowledge.StreamKnowledgeMonitor webStreamMonitor;
+            if (context.getKnowledgeScheduler() != null && context.getTopicIndex() != null) {
+                webStreamMonitor = new com.mkpro.knowledge.StreamKnowledgeMonitor(
+                    context.getKnowledgeScheduler(), context.getTopicIndex(), null); // No LLM callback for web (avoid runner contention)
+            } else {
+                webStreamMonitor = null;
+            }
+
             context.getRunner().runAsync(context.getCurrentSession().sessionKey(), message)
                 .blockingSubscribe(event -> {
                     event.content().ifPresent(content -> {
@@ -399,6 +408,7 @@ public class MkPro {
                                         }
                                     }
                                     responseBuilder.append(t);
+                                    if (webStreamMonitor != null) webStreamMonitor.onChunk(t);
                                     if (context.getEventBus() != null) {
                                         context.getEventBus().emit(com.mkpro.events.MkProEvent.streamChunk(t));
                                     }
@@ -416,6 +426,9 @@ public class MkPro {
                         context.getEventBus().emit(com.mkpro.events.MkProEvent.streamEnd());
                     }
                     
+                    // Stream knowledge monitor: end
+                    if (webStreamMonitor != null) webStreamMonitor.onStreamEnd();
+
                     // Log response
                     if (responseBuilder.length() > 0) {
                         String delegated = com.mkpro.agents.AgentManager.lastDelegatedAgent;
