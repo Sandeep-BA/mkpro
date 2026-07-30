@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 /**
  * MarkovTrainer builds and updates the MarkovRouter's transition matrix from JSONL training data.
  * 
- * Reads JSONL files from datajsonl/ directory and extracts:
+ * Reads JSONL files from .mkpro/datajsonl/ directory and extracts:
  * - User message → classified into TaskCategory via IntentClassifier
  * - Assistant response → parsed to identify which agent was delegated to
  * 

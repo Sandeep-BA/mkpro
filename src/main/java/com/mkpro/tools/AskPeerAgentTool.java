@@ -1,5 +1,7 @@
 package com.mkpro.tools;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.adk.tools.BaseTool;
@@ -32,8 +34,6 @@ import java.util.UUID;
 public class AskPeerAgentTool {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String ANSI_PURPLE = "\u001b[35m";
-    private static final String ANSI_RESET = "\u001b[0m";
     private static final int TIMEOUT_SECONDS = 60;
 
     /**

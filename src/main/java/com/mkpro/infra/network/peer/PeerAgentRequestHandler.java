@@ -1,5 +1,7 @@
 package com.mkpro.infra.network.peer;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.adk.agents.LlmAgent;
@@ -31,8 +33,6 @@ import java.util.concurrent.Executors;
 public class PeerAgentRequestHandler {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String ANSI_PURPLE = "\u001b[35m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private final P2PMessageBus messageBus;
     private final AgentManager agentManager;

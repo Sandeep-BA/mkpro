@@ -1,5 +1,7 @@
 package com.mkpro.agents;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.mkpro.CentralMemory;
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.Provider;
@@ -17,11 +19,6 @@ import java.util.Map;
  * No runner rebuild needed — next createLlm() call will pick up the new config.
  */
 public class ConfigRecommender {
-
-    private static final String ANSI_YELLOW = "\u001b[33m";
-    private static final String ANSI_GREEN = "\u001b[32m";
-    private static final String ANSI_CYAN = "\u001b[36m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     /**
      * Called when a fallback model succeeds after the primary failed.

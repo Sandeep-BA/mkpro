@@ -1,5 +1,7 @@
 package com.mkpro.agents;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.LlmAgent;
 import com.google.adk.artifacts.BaseArtifactService;
@@ -58,9 +60,6 @@ import com.mkpro.models.AgentDefinition;
 import com.mkpro.models.AgentsConfig;
 
 public class AgentManager {
-
-    private static final String ANSI_BLUE = "\u001B[34m";
-    private static final String ANSI_RESET = "\u001B[0m";
 
     /** Last agent delegated to — visible to TerminalUI for Maker tracking */
     public static volatile String lastDelegatedAgent = null;

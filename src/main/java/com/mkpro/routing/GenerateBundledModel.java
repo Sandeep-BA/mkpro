@@ -9,7 +9,7 @@ import java.nio.file.Paths;
  */
 public class GenerateBundledModel {
     public static void main(String[] args) throws Exception {
-        Path dataDir = Paths.get("datajsonl");
+        Path dataDir = Paths.get(".mkpro", "datajsonl");
         Path outputPath = Paths.get("src/main/resources/markov_model_default.dat");
 
         System.out.println("Training from: " + dataDir.toAbsolutePath());

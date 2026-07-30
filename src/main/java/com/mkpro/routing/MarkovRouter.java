@@ -33,11 +33,8 @@ public class MarkovRouter {
     private final Map<String, java.util.List<java.util.List<String>>> stallPatterns = new ConcurrentHashMap<>();
     private final Map<String, Integer> knowledgeStats = new ConcurrentHashMap<>();
 
-    // ═══ Layer 2: Agent → Tool transition probabilities ═══
-    // toolTransitions[agent][lastTool] = {nextTool → count}
-    private final Map<String, Map<String, Map<String, Integer>>> toolTransitions = new ConcurrentHashMap<>();
-    // agentToolFrequency[agent+":"+category] = {tool → count}
-    private final Map<String, Map<String, Integer>> agentToolFrequency = new ConcurrentHashMap<>();
+    // ═══ Layer 2: Agent → Tool transition probabilities (delegated) ═══
+    private final ToolTransitionModel toolModel = new ToolTransitionModel();
 
     private double confidenceThreshold;
     private int totalObservations = 0;
@@ -48,6 +45,53 @@ public class MarkovRouter {
 
     public MarkovRouter(double confidenceThreshold) {
         this.confidenceThreshold = confidenceThreshold;
+        initSeedPatterns();
+    }
+
+    /**
+     * Initialize seed learned patterns so fresh installs have baseline routing intelligence.
+     * These are overwritten when real training data becomes available.
+     */
+    private void initSeedPatterns() {
+        if (!learnedPatterns.isEmpty()) return; // Don't overwrite loaded patterns
+
+        learnedPatterns.put("CODING", java.util.Set.of(
+            "refactor", "implement", "function", "method", "class", "interface",
+            "variable", "algorithm", "debug", "compile", "syntax", "code",
+            "feature", "module", "component", "logic", "bug fix"
+        ));
+        learnedPatterns.put("TESTING", java.util.Set.of(
+            "test", "junit", "assert", "mock", "coverage", "unit test",
+            "integration test", "selenium", "e2e", "regression", "verify"
+        ));
+        learnedPatterns.put("GIT", java.util.Set.of(
+            "commit", "push", "branch", "merge", "rebase", "pull request",
+            "stash", "cherry-pick", "tag", "changelog", "diff"
+        ));
+        learnedPatterns.put("DEVOPS", java.util.Set.of(
+            "docker", "kubernetes", "deploy", "pipeline", "ci/cd", "terraform",
+            "helm", "nginx", "aws", "gcp", "infrastructure", "container"
+        ));
+        learnedPatterns.put("ARCHITECTURE", java.util.Set.of(
+            "design", "pattern", "microservice", "coupling", "cohesion",
+            "architecture", "scalability", "diagram", "refactoring", "solid"
+        ));
+        learnedPatterns.put("DATABASE", java.util.Set.of(
+            "sql", "query", "schema", "migration", "index", "table",
+            "postgres", "mysql", "mongodb", "database", "join"
+        ));
+        learnedPatterns.put("SECURITY", java.util.Set.of(
+            "vulnerability", "xss", "injection", "auth", "oauth", "jwt",
+            "encrypt", "certificate", "firewall", "audit", "penetration"
+        ));
+        learnedPatterns.put("DOCUMENTATION", java.util.Set.of(
+            "readme", "document", "javadoc", "comment", "wiki",
+            "changelog", "api docs", "specification", "markdown"
+        ));
+        learnedPatterns.put("SYSADMIN", java.util.Set.of(
+            "install", "configure", "restart", "service", "process",
+            "permission", "cron", "systemd", "package", "environment"
+        ));
     }
 
     /**
@@ -163,10 +207,11 @@ public class MarkovRouter {
     }
 
     public void setLearnedPatterns(Map<String, java.util.Set<String>> patterns) {
-        this.learnedPatterns.clear();
-        if (patterns != null) {
+        if (patterns != null && !patterns.isEmpty()) {
+            this.learnedPatterns.clear();
             this.learnedPatterns.putAll(patterns);
         }
+        // If patterns is null/empty, keep existing (seed patterns preserved)
     }
 
     /**
@@ -260,27 +305,7 @@ public class MarkovRouter {
      * @param toolsUsed Ordered list of tools used in this turn
      */
     public void recordToolUsage(String agent, IntentClassifier.TaskCategory category, List<String> toolsUsed) {
-        if (agent == null || toolsUsed == null || toolsUsed.isEmpty()) return;
-
-        String freqKey = agent + ":" + category.name();
-
-        // Record frequency: how often this agent uses each tool for this category
-        Map<String, Integer> freq = agentToolFrequency.computeIfAbsent(freqKey, k -> new ConcurrentHashMap<>());
-        for (String tool : toolsUsed) {
-            freq.merge(tool, 1, Integer::sum);
-        }
-
-        // Record transitions: tool₁ → tool₂ sequences within this agent
-        Map<String, Map<String, Integer>> agentTransitions = 
-            toolTransitions.computeIfAbsent(agent, k -> new ConcurrentHashMap<>());
-
-        String lastTool = "_START_"; // Sentinel for first tool in sequence
-        for (String tool : toolsUsed) {
-            agentTransitions
-                .computeIfAbsent(lastTool, k -> new ConcurrentHashMap<>())
-                .merge(tool, 1, Integer::sum);
-            lastTool = tool;
-        }
+        toolModel.recordToolUsage(agent, category, toolsUsed);
     }
 
     /**
@@ -289,28 +314,9 @@ public class MarkovRouter {
      * @return ToolPrediction with tool name and confidence, or null if no data
      */
     public ToolPrediction predictNextTool(String agent, String lastTool) {
-        if (agent == null) return null;
-        
-        Map<String, Map<String, Integer>> agentTrans = toolTransitions.get(agent);
-        if (agentTrans == null) return null;
-
-        String key = (lastTool == null || lastTool.isBlank()) ? "_START_" : lastTool;
-        Map<String, Integer> next = agentTrans.get(key);
-        if (next == null || next.isEmpty()) return null;
-
-        // Find highest probability transition
-        int total = next.values().stream().mapToInt(Integer::intValue).sum();
-        String bestTool = null;
-        int bestCount = 0;
-        for (Map.Entry<String, Integer> entry : next.entrySet()) {
-            if (entry.getValue() > bestCount) {
-                bestCount = entry.getValue();
-                bestTool = entry.getKey();
-            }
-        }
-
-        if (bestTool == null) return null;
-        return new ToolPrediction(bestTool, (double) bestCount / total);
+        ToolTransitionModel.ToolPrediction result = toolModel.predictNextTool(agent, lastTool);
+        if (result == null) return null;
+        return new ToolPrediction(result.tool, result.confidence);
     }
 
     /**
@@ -323,21 +329,12 @@ public class MarkovRouter {
      * @return Ordered list of ToolPrediction (highest frequency first)
      */
     public List<ToolPrediction> getExpectedTools(String agent, IntentClassifier.TaskCategory category, int topK) {
-        if (agent == null || category == null) return Collections.emptyList();
-
-        String freqKey = agent + ":" + category.name();
-        Map<String, Integer> freq = agentToolFrequency.get(freqKey);
-        if (freq == null || freq.isEmpty()) return Collections.emptyList();
-
-        int total = freq.values().stream().mapToInt(Integer::intValue).sum();
-
-        List<ToolPrediction> predictions = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : freq.entrySet()) {
-            predictions.add(new ToolPrediction(entry.getKey(), (double) entry.getValue() / total));
+        List<ToolTransitionModel.ToolPrediction> results = toolModel.getExpectedTools(agent, category, topK);
+        List<ToolPrediction> converted = new ArrayList<>(results.size());
+        for (ToolTransitionModel.ToolPrediction tp : results) {
+            converted.add(new ToolPrediction(tp.tool, tp.confidence));
         }
-
-        predictions.sort((a, b) -> Double.compare(b.confidence, a.confidence));
-        return predictions.size() > topK ? predictions.subList(0, topK) : predictions;
+        return converted;
     }
 
     /**
@@ -345,21 +342,12 @@ public class MarkovRouter {
      * Returns true if the tool is not in the agent's typical toolset (< 5% frequency).
      */
     public boolean isAnomalousTool(String agent, IntentClassifier.TaskCategory category, String tool) {
-        if (agent == null || tool == null) return false;
-
-        String freqKey = agent + ":" + category.name();
-        Map<String, Integer> freq = agentToolFrequency.get(freqKey);
-        if (freq == null || freq.isEmpty()) return false; // No data → can't judge
-
-        int total = freq.values().stream().mapToInt(Integer::intValue).sum();
-        int toolCount = freq.getOrDefault(tool, 0);
-
-        // Anomalous if never seen or < 5% of total usage
-        return (double) toolCount / total < 0.05;
+        return toolModel.isAnomalousTool(agent, category, tool);
     }
 
     /**
      * Tool prediction result.
+     * Delegates to {@link ToolTransitionModel.ToolPrediction} — kept here for API compatibility.
      */
     public static class ToolPrediction {
         public final String tool;
@@ -409,7 +397,7 @@ public class MarkovRouter {
 
             // v4: Layer 2 — tool transitions and frequencies
             HashMap<String, Map<String, Map<String, Integer>>> serializableToolTrans = new HashMap<>();
-            for (var e : toolTransitions.entrySet()) {
+            for (var e : toolModel.getToolTransitions().entrySet()) {
                 HashMap<String, Map<String, Integer>> inner = new HashMap<>();
                 for (var e2 : e.getValue().entrySet()) {
                     inner.put(e2.getKey(), new HashMap<>(e2.getValue()));
@@ -419,7 +407,7 @@ public class MarkovRouter {
             oos.writeObject(serializableToolTrans);
 
             HashMap<String, Map<String, Integer>> serializableToolFreq = new HashMap<>();
-            for (var e : agentToolFrequency.entrySet()) {
+            for (var e : toolModel.getAgentToolFrequency().entrySet()) {
                 serializableToolFreq.put(e.getKey(), new HashMap<>(e.getValue()));
             }
             oos.writeObject(serializableToolFreq);
@@ -531,18 +519,11 @@ public class MarkovRouter {
                 try {
                     Map<String, Map<String, Map<String, Integer>>> loadedToolTrans = (Map<String, Map<String, Map<String, Integer>>>) ois.readObject();
                     if (loadedToolTrans != null) {
-                        for (var e : loadedToolTrans.entrySet()) {
-                            Map<String, Map<String, Integer>> inner = toolTransitions.computeIfAbsent(e.getKey(), k -> new ConcurrentHashMap<>());
-                            for (var e2 : e.getValue().entrySet()) {
-                                inner.put(e2.getKey(), new ConcurrentHashMap<>(e2.getValue()));
-                            }
-                        }
+                        toolModel.setToolTransitions(loadedToolTrans);
                     }
                     Map<String, Map<String, Integer>> loadedToolFreq = (Map<String, Map<String, Integer>>) ois.readObject();
                     if (loadedToolFreq != null) {
-                        for (var e : loadedToolFreq.entrySet()) {
-                            agentToolFrequency.put(e.getKey(), new ConcurrentHashMap<>(e.getValue()));
-                        }
+                        toolModel.setAgentToolFrequency(loadedToolFreq);
                     }
                 } catch (Exception e) { /* OK — v3 model without Layer 2 */ }
             }
@@ -633,7 +614,7 @@ public class MarkovRouter {
      * Get the agent→tool frequency map for display (Layer 2 stats).
      */
     public Map<String, Map<String, Integer>> getAgentToolFrequency() {
-        return Collections.unmodifiableMap(agentToolFrequency);
+        return toolModel.getAgentToolFrequency();
     }
 
     // ==========================================================================

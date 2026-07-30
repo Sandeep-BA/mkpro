@@ -49,13 +49,13 @@ public class TrainCommand implements Command {
     }
 
     private void trainNow(MarkovRouter router, MkProContext context) {
-        Path dataDir = PathUtils.getProjectPath().resolve("datajsonl");
+        Path dataDir = PathUtils.getMkproDataDir().resolve("datajsonl");
         if (!Files.isDirectory(dataDir)) {
-            System.out.println(ANSI_YELLOW + "No datajsonl/ directory found. Use /export first to generate training data." + ANSI_RESET);
+            System.out.println(ANSI_YELLOW + "No .mkpro/datajsonl/ directory found. Use /export first to generate training data." + ANSI_RESET);
             return;
         }
 
-        System.out.println(ANSI_BLUE + "Training Markov Router from datajsonl/..." + ANSI_RESET);
+        System.out.println(ANSI_BLUE + "Training Markov Router from .mkpro/datajsonl/..." + ANSI_RESET);
         int before = router.getTotalObservations();
         int trained = MarkovTrainer.trainFromDirectory(router, dataDir);
         int after = router.getTotalObservations();
@@ -83,7 +83,7 @@ public class TrainCommand implements Command {
         context.setMarkovRouter(fresh);
 
         // Retrain
-        Path dataDir = PathUtils.getProjectPath().resolve("datajsonl");
+        Path dataDir = PathUtils.getMkproDataDir().resolve("datajsonl");
         if (Files.isDirectory(dataDir)) {
             int trained = MarkovTrainer.trainFromDirectory(fresh, dataDir);
             System.out.println(ANSI_GREEN + "Reset + retrained: " + trained + " examples, " + fresh.getTotalObservations() + " observations." + ANSI_RESET);

@@ -1,5 +1,7 @@
 package com.mkpro.tools;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
 import com.google.genai.types.*;
@@ -28,9 +30,6 @@ import java.util.Optional;
  * The image is sent as inline_data and never leaves the LLM API call.
  */
 public class VisionTool {
-
-    private static final String ANSI_BLUE = "\u001b[34m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private static final Map<String, String> MIME_TYPES = Map.of(
         ".jpg", "image/jpeg",

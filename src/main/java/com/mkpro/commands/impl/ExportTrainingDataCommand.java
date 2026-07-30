@@ -75,7 +75,7 @@ public class ExportTrainingDataCommand implements Command {
     public void execute(String[] args, MkProContext context) throws Exception {
         String target = args.length > 0 ? args[0].toLowerCase() : "all";
 
-        Path outputDir = Paths.get("").toAbsolutePath().resolve("datajsonl");
+        Path outputDir = Paths.get("").toAbsolutePath().resolve(".mkpro").resolve("datajsonl");
         Files.createDirectories(outputDir);
 
         List<String> logs = ActionLogger.getLogs();
@@ -120,7 +120,7 @@ public class ExportTrainingDataCommand implements Command {
         if (exported == 0) {
             System.out.println(ANSI_YELLOW + "No conversation pairs found in logs. Chat more and try again." + ANSI_RESET);
         } else {
-            System.out.println(ANSI_GREEN + "Exported " + exported + " total training examples to datajsonl/" + ANSI_RESET);
+            System.out.println(ANSI_GREEN + "Exported " + exported + " total training examples to .mkpro/datajsonl/" + ANSI_RESET);
         }
     }
 
@@ -268,7 +268,7 @@ public class ExportTrainingDataCommand implements Command {
 
     @Override
     public String getDescription() {
-        return "Export chat session data as JSONL training data to datajsonl/ folder. Usage: /export [agent-name|all]";
+        return "Export chat session data as JSONL training data to .mkpro/datajsonl/ folder. Usage: /export [agent-name|all]";
     }
 
     private static class LogEntry {

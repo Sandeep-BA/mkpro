@@ -1,5 +1,7 @@
 package com.mkpro.infra.network.security;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,11 +23,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * Empty whitelist = accept all (open mode).
  */
 public class P2PAuditLog {
-
-    private static final String ANSI_RED_BOLD = "\u001b[1;31m";
-    private static final String ANSI_YELLOW = "\u001b[33m";
-    private static final String ANSI_GREEN = "\u001b[32m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Path AUDIT_LOG_PATH = Paths.get(System.getProperty("user.home"), ".mkpro", "p2p_audit.log");

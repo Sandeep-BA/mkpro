@@ -1,6 +1,7 @@
 package com.mkpro.routing;
 
 import java.util.List;
+import static com.mkpro.ui.AnsiColors.*;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,12 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class MakerLoop {
 
-    private static final String ANSI_PURPLE = "\u001b[35m";
-    private static final String ANSI_GREEN = "\u001b[32m";
-    private static final String ANSI_YELLOW = "\u001b[33m";
-    private static final String ANSI_RED = "\u001b[31m";
-    private static final String ANSI_RESET = "\u001b[0m";
-
     private final MarkovRouter router;
     private final IntentClassifier classifier;
     private final Map<String, MakerState> activeGoals = new ConcurrentHashMap<>();
@@ -33,18 +28,13 @@ public class MakerLoop {
     // Event bus (set after construction)
     private volatile com.mkpro.events.MkProEventBus eventBus;
 
-    // Knowledge components (set after construction, optional)
-    private volatile com.mkpro.knowledge.KnowledgeScheduler knowledgeScheduler;
-    private volatile com.mkpro.knowledge.KnowledgeStore knowledgeStore;
-    private volatile com.mkpro.knowledge.TopicIndex topicIndex;
-    private volatile java.util.function.Function<String, String> llmCallback; // prompt → response
+    // Knowledge adequacy checker (set after construction, optional)
+    private volatile KnowledgeAdequacyChecker knowledgeChecker;
 
     // Configuration
     private double autoCompleteThreshold = 0.75;
     private double escalateThreshold = 0.40;
     private int maxRetries = 3;
-    private static final int MAX_KNOWLEDGE_ACQUISITIONS_PER_GOAL = 2;
-    private static final int KNOWLEDGE_WAIT_SECONDS = 45;
     private static final int PERIODIC_SAVE_INTERVAL = 10; // Save model every N turns
 
     // Periodic save state
@@ -58,6 +48,7 @@ public class MakerLoop {
 
     public void setEventBus(com.mkpro.events.MkProEventBus eventBus) {
         this.eventBus = eventBus;
+        if (knowledgeChecker != null) knowledgeChecker.setEventBus(eventBus);
     }
 
     /**
@@ -66,9 +57,12 @@ public class MakerLoop {
     public void setKnowledgeComponents(com.mkpro.knowledge.KnowledgeScheduler scheduler,
                                        com.mkpro.knowledge.KnowledgeStore store,
                                        com.mkpro.knowledge.TopicIndex index) {
-        this.knowledgeScheduler = scheduler;
-        this.knowledgeStore = store;
-        this.topicIndex = index;
+        if (knowledgeChecker == null) {
+            knowledgeChecker = new KnowledgeAdequacyChecker();
+            knowledgeChecker.setEventBus(eventBus);
+            knowledgeChecker.setRouter(router);
+        }
+        knowledgeChecker.setKnowledgeComponents(scheduler, store, index);
     }
 
     /**
@@ -76,7 +70,12 @@ public class MakerLoop {
      * Function takes a prompt string and returns LLM response.
      */
     public void setLlmCallback(java.util.function.Function<String, String> callback) {
-        this.llmCallback = callback;
+        if (knowledgeChecker == null) {
+            knowledgeChecker = new KnowledgeAdequacyChecker();
+            knowledgeChecker.setEventBus(eventBus);
+            knowledgeChecker.setRouter(router);
+        }
+        knowledgeChecker.setLlmCallback(callback);
     }
 
     /**
@@ -105,7 +104,7 @@ public class MakerLoop {
         else System.out.println(ANSI_PURPLE + "  [Maker] New goal: \"" + truncate(input, 60) + "\" (category: " + category + ")" + ANSI_RESET);
 
         // Proactive knowledge acquisition: check if the goal domain has coverage
-        checkAndAcquireKnowledge(input);
+        if (knowledgeChecker != null) knowledgeChecker.checkPreGoal(input, currentGoal);
 
         return currentGoal;
     }
@@ -339,18 +338,10 @@ public class MakerLoop {
         // Override: Post-turn reactive knowledge acquisition
         // If response shows uncertainty and we haven't maxed out knowledge retries, acquire and retry
         if (action == MarkovRouter.MakerAction.CONTINUE && success && response != null
-                && currentGoal.getKnowledgeRetries() < MAX_KNOWLEDGE_ACQUISITIONS_PER_GOAL) {
-            double uncertaintyScore = detectUncertainty(response);
-            if (uncertaintyScore >= 0.5) {
-                boolean acquired = reactiveKnowledgeAcquire(response);
-                if (acquired) {
-                    currentGoal.incrementKnowledgeRetries();
-                    action = MarkovRouter.MakerAction.RETRY;
-                    currentGoal.setPhase(MakerState.GoalPhase.RETRYING);
-                    String msg = "Response uncertain (" + (int)(uncertaintyScore * 100) + "%). Acquired knowledge → retrying.";
-                    if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-                    else System.out.println(ANSI_YELLOW + "  [Maker] " + msg + ANSI_RESET);
-                }
+                && currentGoal.getKnowledgeRetries() < KnowledgeAdequacyChecker.MAX_KNOWLEDGE_ACQUISITIONS_PER_GOAL) {
+            if (knowledgeChecker != null && knowledgeChecker.reactiveCheck(response, currentGoal)) {
+                action = MarkovRouter.MakerAction.RETRY;
+                currentGoal.setPhase(MakerState.GoalPhase.RETRYING);
             }
         }
 
@@ -470,101 +461,7 @@ public class MakerLoop {
         }
 
         // Knowledge adequacy retrospective
-        retrospectiveKnowledgeAnalysis(success);
-    }
-
-    /**
-     * Post-goal retrospective: correlate knowledge acquisition with goal outcome.
-     * Logs insights about whether knowledge helped and what might be missing.
-     */
-    private void retrospectiveKnowledgeAnalysis(boolean success) {
-        if (currentGoal == null) return;
-
-        List<String> acquired = currentGoal.getAcquiredTopics();
-        int knowledgeRetries = currentGoal.getKnowledgeRetries();
-
-        // Nothing to analyze if no knowledge was involved
-        if (acquired.isEmpty() && !currentGoal.isPreGoalKnowledgeUsed()) return;
-
-        StringBuilder insight = new StringBuilder();
-        insight.append("[Knowledge Retrospective] Goal: \"")
-               .append(truncate(currentGoal.getGoalDescription(), 50)).append("\" → ");
-
-        if (success) {
-            if (knowledgeRetries > 0) {
-                // Knowledge retry led to success — the acquisition helped
-                insight.append("SUCCESS after ").append(knowledgeRetries).append(" knowledge retry(ies). Topics: ")
-                       .append(String.join(", ", acquired));
-                currentGoal.incrementKnowledgeRetrySuccesses();
-            } else if (!acquired.isEmpty()) {
-                // Pre-goal knowledge was available, goal succeeded
-                insight.append("SUCCESS with pre-acquired knowledge: ").append(String.join(", ", acquired));
-            } else {
-                insight.append("SUCCESS (pre-goal knowledge present)");
-            }
-        } else {
-            // Goal failed/escalated — was knowledge a factor?
-            if (acquired.isEmpty()) {
-                // Failed without any knowledge acquisition — might have helped
-                insight.append("FAILED. No knowledge was acquired. Consider if domain docs would help.");
-                // Schedule a retrospective acquisition for future similar goals
-                scheduleRetrospectiveKnowledge();
-            } else {
-                // Failed even with acquired knowledge — knowledge was insufficient
-                insight.append("FAILED despite acquiring: ").append(String.join(", ", acquired))
-                       .append(". Knowledge may have been insufficient or wrong sources.");
-            }
-        }
-
-        // Log the insight
-        String msg = insight.toString();
-        if (eventBus != null) {
-            eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-        } else {
-            System.out.println(ANSI_PURPLE + "  " + msg + ANSI_RESET);
-        }
-
-        // Store in router's memory for future pattern matching
-        router.recordKnowledgeOutcome(currentGoal.getCategory(), acquired, success, knowledgeRetries);
-    }
-
-    /**
-     * When a goal fails without knowledge, schedule a retrospective acquisition
-     * so that future similar goals will have coverage.
-     */
-    private void scheduleRetrospectiveKnowledge() {
-        if (knowledgeScheduler == null || llmCallback == null || currentGoal == null) return;
-        // Only if we haven't already tried to acquire for this goal
-        if (!currentGoal.getAcquiredTopics().isEmpty()) return;
-
-        try {
-            String prompt = "A developer's goal FAILED: \"" + currentGoal.getGoalDescription() + "\"\n" +
-                "The failure may have been caused by lack of domain knowledge.\n" +
-                "Category: " + currentGoal.getCategory() + "\n" +
-                "Agents tried: " + currentGoal.getAgentSequence() + "\n\n" +
-                "What knowledge should be pre-fetched for FUTURE similar goals?\n\n" +
-                "Respond with EXACTLY this format:\n" +
-                "TOPIC:<lowercase-hyphen-name>\n" +
-                "URL:<official documentation URL>\n" +
-                "FOCUS:<what to pre-learn>\n\n" +
-                "If no external knowledge would help (e.g., project-specific issue), respond: NONE";
-
-            String suggestion = llmCallback.apply(prompt);
-            if (suggestion == null || suggestion.trim().equalsIgnoreCase("NONE")) return;
-
-            com.mkpro.knowledge.TopicConfig topic = parseKnowledgeSuggestion(suggestion);
-            if (topic == null) return;
-
-            topic.setRefreshIntervalMinutes(720); // Low priority — background enrichment
-            knowledgeScheduler.addTopic(topic);
-
-            String msg = "Retrospective: scheduled '" + topic.getName() + "' for future goals.";
-            if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-            else System.out.println(ANSI_PURPLE + "  [Maker] " + msg + ANSI_RESET);
-
-        } catch (Exception e) {
-            // Non-fatal
-        }
+        if (knowledgeChecker != null) knowledgeChecker.retrospective(currentGoal, success);
     }
 
     /**
@@ -652,233 +549,6 @@ public class MakerLoop {
         
         // Cap at 1.0, threshold at 3 signal points for high confidence
         return Math.min(1.0, signals / 3.0);
-    }
-
-    /**
-     * Detect uncertainty/weakness in an agent's response.
-     * Returns a score 0.0–1.0. Scores >= 0.5 suggest inadequate knowledge.
-     */
-    private double detectUncertainty(String response) {
-        if (response == null || response.isBlank()) return 0.0;
-
-        String lower = response.toLowerCase();
-        int signals = 0;
-
-        // Strong uncertainty signals
-        String[] strongSignals = {
-            "i'm not sure", "i am not sure", "i don't know", "i'm uncertain",
-            "i cannot confirm", "i don't have enough information",
-            "you should verify", "you should check", "please consult",
-            "i would recommend checking", "i'm not aware of",
-            "this may not be accurate", "i cannot guarantee"
-        };
-        for (String s : strongSignals) {
-            if (lower.contains(s)) signals += 3;
-        }
-
-        // Moderate uncertainty signals
-        String[] moderateSignals = {
-            "generally", "typically", "usually", "in most cases",
-            "might be", "could be", "may vary", "it depends",
-            "from what i recall", "as far as i know", "i believe",
-            "not entirely sure", "double-check", "worth verifying"
-        };
-        for (String s : moderateSignals) {
-            if (lower.contains(s)) signals += 1;
-        }
-
-        // Hedging language (weaker signal)
-        String[] hedging = {
-            "probably", "perhaps", "possibly", "seemingly",
-            "it seems", "it appears", "it looks like"
-        };
-        for (String s : hedging) {
-            if (lower.contains(s)) signals += 1;
-        }
-
-        // Normalize: 5+ signal points = fully uncertain
-        return Math.min(1.0, signals / 5.0);
-    }
-
-    /**
-     * Reactively acquire knowledge based on an uncertain response.
-     * Extracts what the agent was struggling with and schedules a targeted fetch.
-     * @return true if knowledge was acquired successfully
-     */
-    private boolean reactiveKnowledgeAcquire(String response) {
-        if (knowledgeScheduler == null || llmCallback == null || currentGoal == null) return false;
-
-        try {
-            // Ask LLM: "What specific knowledge gap does this response reveal?"
-            String prompt = "An AI agent gave this response to the goal \"" + truncate(currentGoal.getGoalDescription(), 100) + "\":\n\n" +
-                "---\n" + truncate(response, 800) + "\n---\n\n" +
-                "The response shows uncertainty or lacks specificity. " +
-                "What specific knowledge would help? Suggest ONE official documentation source.\n\n" +
-                "Respond with EXACTLY this format:\n" +
-                "TOPIC:<lowercase-hyphen-name>\n" +
-                "URL:<official documentation URL>\n" +
-                "FOCUS:<what to look for, max 1 sentence>\n\n" +
-                "If the response is actually adequate and doesn't need external knowledge, respond: NONE";
-
-            String suggestion = llmCallback.apply(prompt);
-            if (suggestion == null || suggestion.trim().equalsIgnoreCase("NONE")) return false;
-
-            com.mkpro.knowledge.TopicConfig topic = parseKnowledgeSuggestion(suggestion);
-            if (topic == null) return false;
-
-            // Don't re-acquire the same topic
-            if (currentGoal.getAcquiredTopics().contains(topic.getName())) return false;
-
-            boolean added = knowledgeScheduler.addTopic(topic);
-            if (!added) return false;
-
-            currentGoal.addAcquiredTopic(topic.getName());
-
-            String msg = "Reactive knowledge scheduled: " + topic.getName() + " (will be ready for retry)";
-            if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-            else System.out.println(ANSI_PURPLE + "  [Maker] " + msg + ANSI_RESET);
-
-            // Don't wait — the retry cycle gives the scheduler time to fetch.
-            // Knowledge will be available via request_knowledge tool on next turn.
-            return true;
-        } catch (Exception e) {
-            // Non-fatal
-        }
-        return false;
-    }
-
-    /**
-     * Check if the goal domain has knowledge coverage. If not, ask LLM to suggest
-     * a topic and schedule immediate acquisition.
-     */
-    private void checkAndAcquireKnowledge(String goalText) {
-        // Guard: need all components + non-trivial goal
-        if (knowledgeScheduler == null || topicIndex == null || llmCallback == null) {
-            if (knowledgeScheduler == null) System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: scheduler not wired" + ANSI_RESET);
-            else if (topicIndex == null) System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: topicIndex not wired" + ANSI_RESET);
-            else System.out.println(ANSI_YELLOW + "  [Maker] Knowledge check skipped: llmCallback not wired" + ANSI_RESET);
-            return;
-        }
-        if (goalText == null || goalText.split("\\s+").length < 4) return;
-
-        try {
-            // Check existing coverage
-            List<com.mkpro.knowledge.TopicIndex.SearchResult> results = topicIndex.search(goalText, 3);
-            if (!results.isEmpty() && results.get(0).getScore() > 0.3) {
-                // Already have relevant knowledge — log it
-                String topicName = results.get(0).getTopicName();
-                int score = (int)(results.get(0).getScore() * 100);
-                String msg = "Knowledge adequate: " + topicName + " (score: " + score + "%) — skipping acquisition";
-                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-                else System.out.println(ANSI_GREEN + "  [Maker] " + msg + ANSI_RESET);
-                return;
-            }
-
-            // Ask LLM to suggest a knowledge topic
-            String prompt = buildKnowledgeSuggestionPrompt(goalText);
-            String response = llmCallback.apply(prompt);
-            if (response == null || response.isBlank()) return;
-
-            // Parse suggestion
-            com.mkpro.knowledge.TopicConfig topic = parseKnowledgeSuggestion(response);
-            if (topic == null) {
-                // LLM said NONE or unparseable — no external knowledge needed
-                String msg = "Knowledge check: no external docs needed for this goal";
-                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-                else System.out.println(ANSI_GREEN + "  [Maker] " + msg + ANSI_RESET);
-                return;
-            }
-
-            // Schedule acquisition
-            boolean added = knowledgeScheduler.addTopic(topic);
-            if (!added) return; // Already exists
-
-            String msg = "Acquiring knowledge: " + topic.getName() + "...";
-            if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(msg));
-            else System.out.println(ANSI_PURPLE + "  [Maker] " + msg + ANSI_RESET);
-
-            // Wait for first fetch (best-effort, non-blocking beyond timeout)
-            boolean ready = waitForTopicReady(topic.getName(), KNOWLEDGE_WAIT_SECONDS);
-
-            if (ready) {
-                String readyMsg = "Knowledge acquired: " + topic.getName();
-                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(readyMsg));
-                else System.out.println(ANSI_GREEN + "  [Maker] " + readyMsg + ANSI_RESET);
-                currentGoal.setPreGoalKnowledgeUsed(true);
-                currentGoal.addAcquiredTopic(topic.getName());
-            } else {
-                String timeoutMsg = "Knowledge fetch timed out for " + topic.getName() + " — proceeding without.";
-                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system(timeoutMsg));
-                else System.out.println(ANSI_YELLOW + "  [Maker] " + timeoutMsg + ANSI_RESET);
-            }
-
-        } catch (Exception e) {
-            // Non-fatal — proceed without knowledge
-            System.out.println(ANSI_YELLOW + "  [Maker] Knowledge gap check failed: " + e.getMessage() + ANSI_RESET);
-        }
-    }
-
-    private String buildKnowledgeSuggestionPrompt(String goalText) {
-        return "A developer wants to accomplish this goal:\n\"" + goalText + "\"\n\n" +
-            "Determine if this goal requires specialized knowledge that an AI agent might not have " +
-            "(e.g., specific API docs, framework guides, best practices from official sources).\n\n" +
-            "If YES, respond with EXACTLY this format (no extra text):\n" +
-            "TOPIC:<lowercase-hyphen-name>\n" +
-            "URL:<official documentation or reference URL>\n" +
-            "FOCUS:<what to analyze, max 1 sentence>\n\n" +
-            "If NO (the goal is simple, generic, or already well-known), respond with just: NONE\n\n" +
-            "Rules:\n" +
-            "- Only suggest official documentation URLs (docs.*, developer.*, official guides)\n" +
-            "- Topic name should be specific (e.g., 'k8s-hpa-autoscaling' not 'kubernetes')\n" +
-            "- Only suggest if the knowledge would meaningfully help the task";
-    }
-
-    /**
-     * Parse LLM response into a TopicConfig.
-     * Expected format:
-     *   TOPIC:name
-     *   URL:https://...
-     *   FOCUS:instruction
-     */
-    private com.mkpro.knowledge.TopicConfig parseKnowledgeSuggestion(String response) {
-        if (response.trim().equalsIgnoreCase("NONE")) return null;
-
-        String name = null, url = null, focus = null;
-
-        for (String line : response.split("\n")) {
-            line = line.trim();
-            if (line.startsWith("TOPIC:")) name = line.substring(6).trim();
-            else if (line.startsWith("URL:")) url = line.substring(4).trim();
-            else if (line.startsWith("FOCUS:")) focus = line.substring(6).trim();
-        }
-
-        if (name == null || name.isBlank() || url == null || url.isBlank()) return null;
-
-        com.mkpro.knowledge.TopicConfig topic = new com.mkpro.knowledge.TopicConfig();
-        topic.setName(name.toLowerCase().replaceAll("[^a-z0-9-]", "-"));
-        topic.setTitle(name);
-        topic.setSources(java.util.List.of(url));
-        topic.setInstruction(focus != null ? focus : "Analyze for practical implementation guidance.");
-        topic.setRefreshIntervalMinutes(360); // Low refresh — just need initial fetch
-        return topic;
-    }
-
-    /**
-     * Wait for a topic report to be ready in the store.
-     * @return true if ready within timeout
-     */
-    private boolean waitForTopicReady(String topicName, int maxWaitSeconds) {
-        for (int i = 0; i < maxWaitSeconds; i++) {
-            com.mkpro.knowledge.TopicReport report = knowledgeStore.getReport(topicName);
-            if (report != null && report.getSummary() != null && !report.getSummary().isBlank()) {
-                return true;
-            }
-            try { Thread.sleep(1000); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        return false;
     }
 
     private String truncate(String s, int max) {

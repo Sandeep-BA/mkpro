@@ -1,5 +1,7 @@
 package com.mkpro.infra.network.peer;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,8 +25,6 @@ import java.util.List;
 public class PeerHandshake {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String ANSI_CYAN = "\u001b[36m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private final P2PMessageBus messageBus;
     private final String instanceId;

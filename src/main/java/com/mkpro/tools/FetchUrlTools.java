@@ -1,5 +1,7 @@
 package com.mkpro.tools;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
 import com.google.genai.types.FunctionDeclaration;
@@ -22,9 +24,6 @@ import java.util.Optional;
  * Supports GET requests with configurable timeout and response size limits.
  */
 public class FetchUrlTools {
-
-    private static final String ANSI_BLUE = "\u001b[34m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private static final int MAX_RESPONSE_BYTES = 100 * 1024; // 100KB limit
     private static final int TIMEOUT_SECONDS = 15;

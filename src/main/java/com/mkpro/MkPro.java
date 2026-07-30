@@ -7,21 +7,21 @@ import com.mkpro.commands.CommandRegistry;
 import com.mkpro.commands.impl.*;
 
 public class MkPro {
-    // ANSI Color Constants (Maintained for backward compatibility and shared usage)
-    public static final String ANSI_RESET = "\u001b[0m";
-    public static final String ANSI_BRIGHT_GREEN = "\u001b[92m";
-    public static final String ANSI_LIGHT_ORANGE = "\u001b[38;5;214m";
-    public static final String ANSI_YELLOW = "\u001b[33m";
-    public static final String ANSI_BLUE = "\u001b[34m";
-    public static final String ANSI_GREEN = "\u001b[32m";
-    public static final String ANSI_RED = "\u001b[31m";
-    public static final String ANSI_CYAN = "\u001b[36m";
-    public static final String ANSI_DIM = "\u001b[90m";
-    public static final String ANSI_PURPLE = "\u001b[35m";
-    public static final String ANSI_LIGHT_PURPLE = "\u001b[38;5;177m";
-    public static final String ANSI_WHITE = "\u001b[37m";
-    public static final String ANSI_BRIGHT_MAGENTA = "\u001B[95m";
-    public static final String ANSI_BOLD = "\u001b[1m";
+    // ANSI Color Constants — delegated to central AnsiColors class
+    public static final String ANSI_RESET = com.mkpro.ui.AnsiColors.RESET;
+    public static final String ANSI_BRIGHT_GREEN = com.mkpro.ui.AnsiColors.BRIGHT_GREEN;
+    public static final String ANSI_LIGHT_ORANGE = com.mkpro.ui.AnsiColors.LIGHT_ORANGE;
+    public static final String ANSI_YELLOW = com.mkpro.ui.AnsiColors.YELLOW;
+    public static final String ANSI_BLUE = com.mkpro.ui.AnsiColors.BLUE;
+    public static final String ANSI_GREEN = com.mkpro.ui.AnsiColors.GREEN;
+    public static final String ANSI_RED = com.mkpro.ui.AnsiColors.RED;
+    public static final String ANSI_CYAN = com.mkpro.ui.AnsiColors.CYAN;
+    public static final String ANSI_DIM = com.mkpro.ui.AnsiColors.DIM;
+    public static final String ANSI_PURPLE = com.mkpro.ui.AnsiColors.PURPLE;
+    public static final String ANSI_LIGHT_PURPLE = com.mkpro.ui.AnsiColors.LIGHT_PURPLE;
+    public static final String ANSI_WHITE = com.mkpro.ui.AnsiColors.WHITE;
+    public static final String ANSI_BRIGHT_MAGENTA = com.mkpro.ui.AnsiColors.BRIGHT_MAGENTA;
+    public static final String ANSI_BOLD = com.mkpro.ui.AnsiColors.BOLD;
 
     public static void main(String[] args) {
         try {

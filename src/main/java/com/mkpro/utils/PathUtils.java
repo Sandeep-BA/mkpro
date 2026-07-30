@@ -21,6 +21,14 @@ public class PathUtils {
         return Paths.get(System.getProperty("user.dir"));
     }
 
+    /**
+     * Get the .mkpro data directory for the current project.
+     * All runtime-generated data (training, exports, schedules) goes here.
+     */
+    public static Path getMkproDataDir() {
+        return getProjectPath().resolve(".mkpro");
+    }
+
     public static void ensureDirectoriesExist(Path path) throws IOException {
         Path parent = path.getParent();
         if (parent != null && !Files.exists(parent)) {

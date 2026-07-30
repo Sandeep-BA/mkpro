@@ -1,5 +1,7 @@
 package com.mkpro.tools;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -17,10 +19,6 @@ import java.util.Map;
  *   - SSE response parsing
  */
 public class McpProtocolClient {
-
-    private static final String ANSI_BLUE = "\u001b[34m";
-    private static final String ANSI_YELLOW = "\u001b[33m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NORMAL)

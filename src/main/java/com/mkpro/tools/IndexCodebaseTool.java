@@ -1,5 +1,7 @@
 package com.mkpro.tools;
 
+import static com.mkpro.ui.AnsiColors.*;
+
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
 import com.google.genai.types.FunctionDeclaration;
@@ -24,10 +26,6 @@ import java.util.stream.Stream;
  * Current implementation indexes file paths and content chunks into the vector store.
  */
 public class IndexCodebaseTool {
-
-    private static final String ANSI_BLUE = "\u001b[34m";
-    private static final String ANSI_GREEN = "\u001b[32m";
-    private static final String ANSI_RESET = "\u001b[0m";
 
     private static final String[] INDEXABLE_EXTENSIONS = {
         ".java", ".kt", ".py", ".js", ".ts", ".tsx", ".jsx",
