@@ -505,4 +505,10 @@ public class MkProContext {
     public void setEventBus(com.mkpro.events.MkProEventBus eventBus) {
         this.eventBus = eventBus;
     }
+
+    // FactEngine
+    private com.mkpro.facts.FactEngine factEngine;
+
+    public com.mkpro.facts.FactEngine getFactEngine() { return factEngine; }
+    public void setFactEngine(com.mkpro.facts.FactEngine factEngine) { this.factEngine = factEngine; }
 }

@@ -40,6 +40,7 @@ public class MakerLoop {
     // Periodic save state
     private volatile int globalTurnCounter = 0;
     private volatile java.nio.file.Path modelSavePath;
+    private volatile com.mkpro.facts.FactEngine factEngine;
 
     public MakerLoop(MarkovRouter router) {
         this.router = router;
@@ -155,13 +156,47 @@ public class MakerLoop {
                         hint.append(tools.get(i).tool);
                     }
                     hint.append(".");
+                    // Also append relevant facts on first turn
+                    if (factEngine != null) {
+                        String facts = factEngine.getRelevantFacts(currentGoal.getGoalDescription());
+                        if (facts != null) {
+                            hint.append("\n").append(facts);
+                            if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Injected verified facts into context"));
+                            else System.out.println(ANSI_GREEN + "  [FactEngine] Injected verified facts into context" + ANSI_RESET);
+                        }
+                    }
                     return hint.toString();
                 }
+            }
+            // No tool hint, but still check for relevant facts on first turn
+            if (factEngine != null) {
+                String facts = factEngine.getRelevantFacts(currentGoal.getGoalDescription());
+                if (facts != null) {
+                    if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Injected verified facts into context"));
+                    else System.out.println(ANSI_GREEN + "  [FactEngine] Injected verified facts into context" + ANSI_RESET);
+                    return facts;
+                } else {
+                    System.out.println(ANSI_DIM + "  [FactEngine] No relevant facts for: " + currentGoal.getGoalDescription().substring(0, Math.min(60, currentGoal.getGoalDescription().length())) + ANSI_RESET);
+                }
+            } else {
+                System.out.println(ANSI_DIM + "  [FactEngine] Not wired (factEngine is null)" + ANSI_RESET);
             }
             return null;
         }
 
-        return currentGoal.generateStimulus(router);
+        String stimulus = currentGoal.generateStimulus(router);
+
+        // Inject verified facts relevant to the goal
+        if (factEngine != null) {
+            String facts = factEngine.getRelevantFacts(currentGoal.getGoalDescription());
+            if (facts != null) {
+                stimulus = stimulus + "\n" + facts;
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Injected verified facts into context"));
+                else System.out.println(ANSI_GREEN + "  [FactEngine] Injected verified facts into context" + ANSI_RESET);
+            }
+        }
+
+        return stimulus;
     }
 
     /**
@@ -254,6 +289,15 @@ public class MakerLoop {
                     currentGoal.setAnomalousToolDetected(true);
                     break; // Only flag once per turn
                 }
+            }
+        }
+
+        // Post-turn fact validation: check response for math errors and relationship conflicts
+        if (factEngine != null && response != null && !response.isBlank()) {
+            java.util.List<String> factIssues = factEngine.validateResponse(response);
+            for (String issue : factIssues) {
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("⚠ Fact: " + issue));
+                else System.out.println(ANSI_YELLOW + "  [FactEngine] " + issue + ANSI_RESET);
             }
         }
 
@@ -501,6 +545,13 @@ public class MakerLoop {
      */
     public void setModelSavePath(java.nio.file.Path path) {
         this.modelSavePath = path;
+    }
+
+    /**
+     * Set the FactEngine for pre-turn injection and post-turn validation.
+     */
+    public void setFactEngine(com.mkpro.facts.FactEngine engine) {
+        this.factEngine = engine;
     }
 
     /**

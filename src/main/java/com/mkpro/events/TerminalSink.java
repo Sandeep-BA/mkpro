@@ -54,6 +54,9 @@ public class TerminalSink implements MkProEventListener {
             case EDIT_REJECTED -> {
                 System.out.println("\u001b[31m  ✗ [CodeEditor] Changes rejected: " + event.get("path") + RESET);
             }
+            case SYSTEM -> {
+                System.out.println(DIM + "  " + event.get("message") + RESET);
+            }
             default -> {
                 // Other event types not handled by terminal sink
             }

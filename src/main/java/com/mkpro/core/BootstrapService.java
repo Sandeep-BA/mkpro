@@ -529,6 +529,12 @@ public class BootstrapService {
             com.mkpro.routing.MakerLoop makerLoop = new com.mkpro.routing.MakerLoop(markovRouter);
             context.setMakerLoop(makerLoop);
 
+            // Initialize FactEngine (verified facts + relationship graph)
+            com.mkpro.facts.FactEngine factEngine = new com.mkpro.facts.FactEngine();
+            context.setFactEngine(factEngine);
+            com.mkpro.facts.VerifyFactTool.init(factEngine);
+            System.out.println(ANSI_GREEN + factEngine.getStats() + ANSI_RESET);
+
             String sessionId = "default-session";
             SessionKey sessionKey = new SessionKey("mkpro", "Coordinator", sessionId);
             Session session = null;

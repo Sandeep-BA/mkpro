@@ -95,6 +95,11 @@ public class ToolRegistry {
             com.mkpro.knowledge.RequestKnowledgeTool.create()
         ));
 
+        // Fact verification (math formulas + relationship checking)
+        toolCache.put("verify_fact", List.of(
+            com.mkpro.facts.VerifyFactTool.create()
+        ));
+
         // Selenium browser tools
         try {
             toolCache.put("selenium", List.of(

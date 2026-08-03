@@ -81,6 +81,10 @@ public class MkPro {
                 // Set model save path for periodic saves
                 java.nio.file.Path modelPath = com.mkpro.utils.PathUtils.getProjectPath().resolve(".mkpro").resolve("markov_model.dat");
                 context.getMakerLoop().setModelSavePath(modelPath);
+                // Wire FactEngine for pre-turn injection and post-turn validation
+                if (context.getFactEngine() != null) {
+                    context.getMakerLoop().setFactEngine(context.getFactEngine());
+                }
                 // Wire knowledge components for proactive gap detection
                 if (context.getKnowledgeScheduler() != null) {
                     context.getMakerLoop().setKnowledgeComponents(
@@ -172,6 +176,7 @@ public class MkPro {
         registry.register(new KnowledgeCommand());
         registry.register(new WebCommand());
         registry.register(new SchedulerCommand());
+        registry.register(new FactsCommand());
         registry.register(new HelpCommand(registry));
         registry.register(new ExitCommand());
         // /quit is an alias for /exit
