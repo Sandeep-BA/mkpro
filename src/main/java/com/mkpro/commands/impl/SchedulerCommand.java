@@ -130,6 +130,40 @@ public class SchedulerCommand implements Command {
             // Init RequestKnowledgeTool
             RequestKnowledgeTool.init(scheduler, store);
 
+            // Wire FactExtractor if FactEngine is available
+            if (context.getFactEngine() != null) {
+                // Reuse the scheduler's analyze callback for fact extraction LLM calls
+                final com.mkpro.core.MkProContext ctx3 = context;
+                com.mkpro.facts.FactExtractor extractor = new com.mkpro.facts.FactExtractor(
+                    context.getFactEngine(), prompt -> {
+                        try {
+                            if (ctx3.getRunner() == null || ctx3.getCurrentSession() == null) return null;
+                            com.mkpro.knowledge.RequestKnowledgeTool.enterSchedulerContext();
+                            try {
+                                com.google.genai.types.Content msg = com.google.genai.types.Content.fromParts(
+                                    new com.google.genai.types.Part[]{com.google.genai.types.Part.fromText(prompt)});
+                                StringBuilder resp = new StringBuilder();
+                                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                                ctx3.getRunner().runAsync(ctx3.getCurrentSession().sessionKey(), msg)
+                                    .blockingSubscribe(
+                                        event -> event.content().ifPresent(c -> c.parts().ifPresent(parts -> {
+                                            for (com.google.genai.types.Part part : parts) {
+                                                part.text().ifPresent(resp::append);
+                                            }
+                                        })),
+                                        error -> latch.countDown(),
+                                        latch::countDown
+                                    );
+                                latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                                return resp.toString().trim().isEmpty() ? null : resp.toString().trim();
+                            } finally {
+                                com.mkpro.knowledge.RequestKnowledgeTool.exitSchedulerContext();
+                            }
+                        } catch (Exception e) { return null; }
+                    });
+                scheduler.setFactExtractor(extractor);
+            }
+
             // Rebuild index from existing reports
             for (TopicReport report : store.getAllReports()) {
                 if (report.getSummary() != null && !report.getSummary().isBlank()) {

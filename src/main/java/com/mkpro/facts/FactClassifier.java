@@ -32,12 +32,15 @@ public class FactClassifier {
                     matchCount++;
                 }
             }
-            if (matchCount > 0) {
-                // Score: matched keywords / total keywords (specificity bonus)
+            // Require at least 2 keyword matches to avoid false positives
+            // (e.g., "force" alone shouldn't trigger F=ma; need "force" + "mass" or "acceleration")
+            if (matchCount >= 2) {
                 double score = (double) matchCount / fact.getKeywords().size();
-                // Bonus for multi-word keyword matches (more specific)
-                if (matchCount >= 2) score += 0.3;
+                score += 0.3; // Multi-match bonus
                 scored.add(new ScoredFact(fact, score));
+            } else if (matchCount == 1 && fact.getKeywords().size() == 1) {
+                // Single-keyword facts are very specific (e.g., "pythagor") — allow them
+                scored.add(new ScoredFact(fact, 0.5));
             }
         }
 

@@ -65,6 +65,9 @@ public class RelationshipValidator {
         // Check "doesn't need/require" pattern
         checkNegationPattern(lower, issues);
 
+        // Check "X replaces Y" where Y actually replaces X
+        checkReplacesContradiction(lower, issues);
+
         return issues;
     }
 
@@ -97,6 +100,22 @@ public class RelationshipValidator {
         }
     }
 
+    private void checkReplacesContradiction(String text, List<String> issues) {
+        if (replacesCache == null) return;
+        // Pattern: "X replaces Y" where we know "Y replaces X"
+        for (RelationshipTriple triple : replacesCache) {
+            String subj = triple.getSubject().toLowerCase();
+            String obj = triple.getObject().toLowerCase();
+            // Check if text claims the reverse: "obj replaces subj"
+            String reversePattern = obj + " replaces " + subj;
+            String reversePattern2 = obj + " replace " + subj;
+            if (text.contains(reversePattern) || text.contains(reversePattern2)) {
+                issues.add("CONFLICT: Known fact is '" + triple.getSubject() + " replaces " +
+                    triple.getObject() + "', but claim reverses this.");
+            }
+        }
+    }
+
     private void checkNegationPattern(String text, List<String> issues) {
         // Patterns: "doesn't need", "doesn't require", "no need for", "not require"
         String[] negations = {"doesn't need", "doesn't require", "does not need",
@@ -121,6 +140,7 @@ public class RelationshipValidator {
     }
 
     private List<RelationshipTriple> requiresCache;
+    private List<RelationshipTriple> replacesCache;
 
     private List<RelationshipTriple> getRequiresRelationships() {
         if (requiresCache == null) {
@@ -139,6 +159,13 @@ public class RelationshipValidator {
         for (RelationshipTriple t : store.getAllRelationships()) {
             if ("requires".equals(t.getPredicate())) {
                 requiresCache.add(t);
+            }
+        }
+        // Also cache "replaces" for contradiction detection
+        replacesCache = new ArrayList<>();
+        for (RelationshipTriple t : store.getAllRelationships()) {
+            if ("replaces".equals(t.getPredicate())) {
+                replacesCache.add(t);
             }
         }
     }

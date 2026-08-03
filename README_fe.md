@@ -259,3 +259,108 @@ src/main/resources/
 4. **Graph for relationships** — BFS gives transitive inference. Adjacency list is fast for small graphs (~100 nodes).
 5. **Separation of math vs. relationships** — Different verification methods (compute vs. traverse), unified through FactEngine orchestrator.
 6. **facts.yaml in resources** — Immutable truths bundled with the application. Not user-editable at runtime (unlike schedules.yaml which is mutable).
+
+
+7. **Confidence-scored edges** — Static YAML facts get 1.0, dynamically extracted facts get 0.8. Both are queryable and injectable.
+8. **Per-evaluation Groovy threads** — Each script runs in a fresh daemon thread. Timeout abandons the thread without blocking future evaluations.
+9. **2-keyword minimum** — Prevents false positives ("force" alone won't trigger F=ma; needs "force" + "mass" or "acceleration").
+
+## Knowledge ↔ Fact Integration (Option C)
+
+The Knowledge Scheduler and Fact Engine are unified through a **fact extraction pipeline**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Knowledge Scheduler fetches docs from URLs                               │
+│     ↓                                                                    │
+│ LLM analyzes → produces text summary (TopicReport)                      │
+│     ↓                                                                    │
+│ FactExtractor (2 passes):                                                │
+│     Pass 1: Extract relationships → FACT: subject | predicate | object  │
+│     Pass 2: Extract formulas → FORMULA: name | expr | keywords          │
+│                                  SCRIPT: def verify(Map v) { ... }      │
+│     ↓                                                                    │
+│ FactEngine graph grows with each Knowledge refresh:                      │
+│   • Static YAML facts (confidence 1.0) — bundled, eternal               │
+│   • Extracted relationships (confidence 0.8) — from fetched docs        │
+│   • Extracted formulas (confidence 0.8) — with optional Groovy scripts  │
+│     ↓                                                                    │
+│ Unified query via /know and pre-turn injection                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### How it works in practice
+
+1. User adds a knowledge topic: `/know add redis-caching https://redis.io/docs`
+2. Knowledge Scheduler fetches and analyzes the docs
+3. FactExtractor runs on the summary:
+
+```
+Pass 1 (relationships):
+  FACT: Redis Sentinel | provides | high availability
+  FACT: Redis Cluster | requires | minimum 3 master nodes
+  FACT: Redis Streams | replaces | Redis Pub/Sub for persistence
+
+Pass 2 (math/formulas):
+  FORMULA: cache_hit_ratio | hit_rate = hits / (hits + misses) | cache,hit ratio,miss rate
+  SCRIPT: def verify(Map v) { [result: (v.hits as double)/((v.hits as double)+(v.misses as double)), unit: "ratio"] }
+```
+
+4. Next time an agent works on Redis caching, pre-turn injection includes:
+```
+[VERIFIED FACTS]
+  • Redis Sentinel provides high availability
+  • Redis Cluster requires minimum 3 master nodes
+  • hit_rate = hits / (hits + misses)
+```
+
+### FactExtractor Safety
+
+Auto-generated Groovy scripts from LLM extraction are safety-checked:
+
+| Check | Purpose |
+|---|---|
+| Must contain `def verify(Map` | Ensures correct function signature |
+| Max 500 characters | Prevents complex multi-statement scripts |
+| Blocked: Runtime, Process, System, exec, File, URL, Socket, Thread, Class.forName, import | No I/O, networking, or system access |
+| `SCRIPT: NONE` option | LLM can decline to generate script for complex formulas |
+| Per-evaluation daemon thread | Even if script hangs, next evaluation is unaffected |
+
+### Confidence Scoring
+
+| Source | Confidence | Meaning |
+|---|---|---|
+| `facts.yaml` (bundled) | 1.0 | Curated, verified, eternal |
+| FactExtractor (from Knowledge docs) | 0.8 | LLM-extracted, likely correct but not manually verified |
+| Future: user-confirmed extracted facts | 0.95 | User validated the extraction |
+
+### Unified `/know` Query
+
+```
+/know redis caching
+
+╔══ Knowledge Search: "redis caching" ══╗
+
+  1. redis-caching (78.5% match)
+     Redis provides in-memory caching with TTL support, eviction policies...
+     Last updated: 2026-08-03T14:30
+
+  ── Verified Relationships ──
+    • Redis Sentinel provides high availability
+    • Redis Cluster requires minimum 3 master nodes
+    • Redis Streams replaces Redis Pub/Sub for persistence
+```
+
+### Self-Improving Knowledge Loop
+
+```
+Session 1: User asks about Redis → Knowledge Scheduler fetches docs
+           → FactExtractor adds 5 relationships + 2 formulas to graph
+
+Session 2: User asks about Redis caching strategy
+           → Pre-turn injection includes extracted Redis facts
+           → Agent gives more accurate answer with correct formulas
+           → Post-turn validation catches "Redis doesn't need Sentinel" → CONFLICT flagged
+```
+
+The system gets smarter with each Knowledge Scheduler refresh — not just accumulating text, but building a verified relationship graph that actively prevents agent errors.

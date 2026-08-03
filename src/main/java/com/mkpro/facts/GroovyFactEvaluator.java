@@ -18,16 +18,9 @@ import java.util.concurrent.*;
 public class GroovyFactEvaluator {
 
     private static final long TIMEOUT_MS = 5000;
-    private final ExecutorService executor;
     private final CompilerConfiguration config;
 
     public GroovyFactEvaluator() {
-        this.executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "fact-evaluator");
-            t.setDaemon(true);
-            return t;
-        });
-
         this.config = new CompilerConfiguration();
         ImportCustomizer imports = new ImportCustomizer();
         imports.addStarImports("java.lang.Math");
@@ -70,9 +63,16 @@ public class GroovyFactEvaluator {
 
     /**
      * Execute a Groovy script with variables and timeout.
+     * Uses a fresh daemon thread per evaluation to prevent permanent blocking.
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeScript(String script, Map<String, Object> variables) {
+        ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "fact-eval-" + System.nanoTime());
+            t.setDaemon(true);
+            return t;
+        });
+
         Future<Map<String, Object>> future = executor.submit(() -> {
             try {
                 Binding binding = new Binding();
@@ -97,13 +97,15 @@ public class GroovyFactEvaluator {
             return Map.of("error", "Script timed out (5s limit)");
         } catch (Exception e) {
             return Map.of("error", "Execution failed: " + e.getMessage());
+        } finally {
+            executor.shutdownNow(); // Abandon the thread if still running
         }
     }
 
     /**
-     * Shutdown the executor.
+     * Shutdown — no persistent resources to clean up (per-eval threads are daemon).
      */
     public void shutdown() {
-        executor.shutdownNow();
+        // No-op: each evaluation creates/destroys its own executor
     }
 }

@@ -156,24 +156,13 @@ public class KnowledgeAdequacyChecker {
             boolean added = knowledgeScheduler.addTopic(topic);
             if (!added) return; // Already exists
 
-            String msg = "Acquiring knowledge: " + topic.getName() + "...";
+            String msg = "Knowledge scheduled: " + topic.getName() + " (will be ready for next turn)";
             if (eventBus != null) eventBus.emit(MkProEvent.system(msg));
             else System.out.println(ANSI_PURPLE + "  [Maker] " + msg + ANSI_RESET);
 
-            // Wait for first fetch (best-effort, non-blocking beyond timeout)
-            boolean ready = waitForTopicReady(topic.getName(), KNOWLEDGE_WAIT_SECONDS);
-
-            if (ready) {
-                String readyMsg = "Knowledge acquired: " + topic.getName();
-                if (eventBus != null) eventBus.emit(MkProEvent.system(readyMsg));
-                else System.out.println(ANSI_GREEN + "  [Maker] " + readyMsg + ANSI_RESET);
-                currentGoal.setPreGoalKnowledgeUsed(true);
-                currentGoal.addAcquiredTopic(topic.getName());
-            } else {
-                String timeoutMsg = "Knowledge fetch timed out for " + topic.getName() + " — proceeding without.";
-                if (eventBus != null) eventBus.emit(MkProEvent.system(timeoutMsg));
-                else System.out.println(ANSI_YELLOW + "  [Maker] " + timeoutMsg + ANSI_RESET);
-            }
+            // Non-blocking: don't wait for fetch. The scheduler will fetch in background.
+            // Knowledge will be available via request_knowledge tool on next turn.
+            currentGoal.addAcquiredTopic(topic.getName());
 
         } catch (Exception e) {
             // Non-fatal — proceed without knowledge

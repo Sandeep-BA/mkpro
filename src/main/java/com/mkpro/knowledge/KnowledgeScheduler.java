@@ -40,6 +40,7 @@ public class KnowledgeScheduler {
     private final Map<String, TopicConfig> topicsByName;
 
     private volatile BiFunction<String, String, String> analyzeCallback;
+    private volatile com.mkpro.facts.FactExtractor factExtractor;
 
     public KnowledgeScheduler(KnowledgeStore store, TopicIndex index, SourceFetcher fetcher, List<TopicConfig> topics) {
         this.store = Objects.requireNonNull(store, "store must not be null");
@@ -186,6 +187,14 @@ public class KnowledgeScheduler {
         index.indexTopic(topicName, cleanedResult);
         index.rebuildIdf();
         log("Reindexed topic: " + topicName);
+
+        // i. Extract structured facts into FactEngine graph
+        if (factExtractor != null) {
+            int extracted = factExtractor.extractAndAdd(topicName, cleanedResult);
+            if (extracted > 0) {
+                log("Extracted " + extracted + " relationship(s) from: " + topicName);
+            }
+        }
     }
 
     /**
@@ -194,6 +203,13 @@ public class KnowledgeScheduler {
      */
     public void setAnalyzeCallback(BiFunction<String, String, String> callback) {
         this.analyzeCallback = callback;
+    }
+
+    /**
+     * Set the FactExtractor for extracting structured relationships from analyzed summaries.
+     */
+    public void setFactExtractor(com.mkpro.facts.FactExtractor extractor) {
+        this.factExtractor = extractor;
     }
 
     /**

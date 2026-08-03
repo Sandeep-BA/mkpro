@@ -14,51 +14,49 @@ public class RelationshipGraph {
     private final Map<String, List<Edge>> outgoing = new ConcurrentHashMap<>();
     private final Map<String, List<Edge>> incoming = new ConcurrentHashMap<>();
 
-    // Inverse predicates for contradiction detection
-    private static final Map<String, String> INVERSE_PREDICATES = Map.of(
-        "requires", "required_by",
-        "replaces", "replaced_by",
-        "extends", "extended_by",
-        "part_of", "has_part",
-        "manages", "managed_by"
-    );
-
-    // Contradictory predicate pairs
-    private static final Map<String, String> CONTRADICTIONS = Map.of(
-        "requires", "not_requires",
-        "replaces", "replaced_by"  // A replaces B means B can't replace A
-    );
-
     public static class Edge {
         public final String predicate;
         public final String target;
         public final String domain;
+        public final double confidence; // 1.0 = static YAML, 0.7-0.9 = extracted from docs
 
         public Edge(String predicate, String target, String domain) {
+            this(predicate, target, domain, 1.0);
+        }
+
+        public Edge(String predicate, String target, String domain, double confidence) {
             this.predicate = predicate;
             this.target = target;
             this.domain = domain;
+            this.confidence = confidence;
         }
 
         @Override
         public String toString() {
-            return "--" + predicate + "--> " + target;
+            return "--" + predicate + "--> " + target + (confidence < 1.0 ? " (" + (int)(confidence*100) + "%)" : "");
         }
     }
 
     /**
-     * Add a relationship triple to the graph.
+     * Add a relationship triple to the graph (confidence = 1.0).
      */
     public void addTriple(RelationshipTriple triple) {
+        addTriple(triple, 1.0);
+    }
+
+    /**
+     * Add a relationship triple with explicit confidence score.
+     */
+    public void addTriple(RelationshipTriple triple, double confidence) {
         String subject = normalize(triple.getSubject());
         String object = normalize(triple.getObject());
         String predicate = triple.getPredicate();
         String domain = triple.getDomain();
 
-        outgoing.computeIfAbsent(subject, k -> new ArrayList<>())
-                .add(new Edge(predicate, object, domain));
-        incoming.computeIfAbsent(object, k -> new ArrayList<>())
-                .add(new Edge(predicate, subject, domain));
+        outgoing.computeIfAbsent(subject, k -> new java.util.concurrent.CopyOnWriteArrayList<>())
+                .add(new Edge(predicate, object, domain, confidence));
+        incoming.computeIfAbsent(object, k -> new java.util.concurrent.CopyOnWriteArrayList<>())
+                .add(new Edge(predicate, subject, domain, confidence));
     }
 
     /**
@@ -180,6 +178,17 @@ public class RelationshipGraph {
      */
     public int edgeCount() {
         return outgoing.values().stream().mapToInt(List::size).sum();
+    }
+
+    /**
+     * Get all edges (for iteration/stats).
+     */
+    public List<Edge> getAllEdges() {
+        List<Edge> all = new ArrayList<>();
+        for (List<Edge> edges : outgoing.values()) {
+            all.addAll(edges);
+        }
+        return all;
     }
 
     private String normalize(String s) {

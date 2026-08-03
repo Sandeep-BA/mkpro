@@ -28,6 +28,13 @@ public class VerifyFactTool {
     }
 
     /**
+     * Get the engine instance (used by /know command for unified query).
+     */
+    public static FactEngine getEngine() {
+        return engine;
+    }
+
+    /**
      * Create the verify_fact BaseTool.
      */
     public static BaseTool create() {

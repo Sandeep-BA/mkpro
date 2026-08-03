@@ -128,4 +128,24 @@ public class FactStore {
 
     public int mathFactCount() { return mathFacts.size(); }
     public int relationshipCount() { return relationships.size(); }
+
+    /**
+     * Add a relationship triple at runtime (from Knowledge Scheduler extraction).
+     */
+    public void addRelationship(RelationshipTriple triple) {
+        if (triple == null || triple.getSubject() == null || triple.getPredicate() == null) return;
+        relationships.add(triple);
+    }
+
+    /**
+     * Add a math fact at runtime.
+     */
+    public void addMathFact(MathFact fact) {
+        if (fact == null || fact.getKey() == null) return;
+        mathFacts.put(fact.getKey(), fact);
+        // Update keyword index
+        for (String kw : fact.getKeywords()) {
+            keywordIndex.computeIfAbsent(kw, k -> new ArrayList<>()).add(fact.getKey());
+        }
+    }
 }

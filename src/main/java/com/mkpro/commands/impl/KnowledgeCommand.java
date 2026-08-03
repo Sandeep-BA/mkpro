@@ -176,6 +176,24 @@ public class KnowledgeCommand implements Command {
             }
             out.println();
         }
+
+        // Also show relationship facts from FactEngine if available
+        com.mkpro.facts.FactEngine factEngine = null;
+        try {
+            // Access via reflection-free path if context is available
+            factEngine = com.mkpro.facts.VerifyFactTool.getEngine();
+        } catch (Exception e) { /* ignore */ }
+
+        if (factEngine != null) {
+            List<String> rels = factEngine.queryRelationships(query);
+            if (!rels.isEmpty()) {
+                out.println("\u001b[36m  ── Verified Relationships ──\u001b[0m");
+                for (String rel : rels) {
+                    out.println("\u001b[90m    • " + rel + "\u001b[0m");
+                }
+                out.println();
+            }
+        }
     }
 
     private void listTopics(PrintWriter out, KnowledgeStore store) {

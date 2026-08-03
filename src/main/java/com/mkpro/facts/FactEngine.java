@@ -95,12 +95,22 @@ public class FactEngine {
     public Map<String, Object> verifyMath(String factKey, Map<String, Object> variables) {
         MathFact fact = store.getMathFact(factKey);
         if (fact == null) {
-            // Try to find by keyword
-            List<MathFact> found = store.findByKeywords(List.of(factKey));
+            // Try partial key match (e.g., "circle_area" matches "geometry.circle_area")
+            for (MathFact mf : store.getAllMathFacts()) {
+                if (mf.getKey().endsWith("." + factKey) || mf.getKey().equals(factKey)) {
+                    fact = mf;
+                    break;
+                }
+            }
+        }
+        if (fact == null) {
+            // Try keyword search (split underscores into separate keywords)
+            String[] parts = factKey.replace("_", " ").split("\\s+");
+            List<MathFact> found = store.findByKeywords(java.util.Arrays.asList(parts));
             if (!found.isEmpty()) {
                 fact = found.get(0);
             } else {
-                return Map.of("error", "Unknown fact: " + factKey);
+                return Map.of("error", "Unknown fact: " + factKey + ". Use /facts math to list available facts.");
             }
         }
         return evaluator.verify(fact, variables);
@@ -112,7 +122,17 @@ public class FactEngine {
     public Map<String, Object> validateMath(String factKey, Map<String, Object> variables) {
         MathFact fact = store.getMathFact(factKey);
         if (fact == null) {
-            List<MathFact> found = store.findByKeywords(List.of(factKey));
+            // Try partial key match
+            for (MathFact mf : store.getAllMathFacts()) {
+                if (mf.getKey().endsWith("." + factKey) || mf.getKey().equals(factKey)) {
+                    fact = mf;
+                    break;
+                }
+            }
+        }
+        if (fact == null) {
+            String[] parts = factKey.replace("_", " ").split("\\s+");
+            List<MathFact> found = store.findByKeywords(java.util.Arrays.asList(parts));
             if (!found.isEmpty()) fact = found.get(0);
             else return Map.of("error", "Unknown fact: " + factKey);
         }
@@ -154,6 +174,39 @@ public class FactEngine {
     public FactClassifier getClassifier() { return classifier; }
     public RelationshipValidator getValidator() { return validator; }
     public RelationshipGraph getGraph() { return graph; }
+
+    /**
+     * Add a relationship at runtime with confidence score.
+     * Used by FactExtractor when Knowledge Scheduler discovers relationships from docs.
+     */
+    public void addRelationship(String subject, String predicate, String object, String domain, double confidence) {
+        RelationshipTriple triple = new RelationshipTriple();
+        triple.setSubject(subject);
+        triple.setPredicate(predicate);
+        triple.setObject(object);
+        triple.setDomain(domain);
+
+        // Check for contradiction before adding
+        String contradiction = graph.detectContradiction(subject, predicate, object);
+        if (contradiction != null) {
+            System.out.println("\u001b[33m  [FactEngine] Skipped contradicting fact: " + subject + " " + predicate + " " + object + " (" + contradiction + ")\u001b[0m");
+            return;
+        }
+
+        store.addRelationship(triple);
+        graph.addTriple(triple, confidence);
+    }
+
+    /**
+     * Get count of dynamically extracted facts (confidence < 1.0).
+     */
+    public int extractedFactCount() {
+        int count = 0;
+        for (var edges : graph.getAllEdges()) {
+            if (edges.confidence < 1.0) count++;
+        }
+        return count;
+    }
 
     public void shutdown() {
         evaluator.shutdown();

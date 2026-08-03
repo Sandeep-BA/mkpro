@@ -78,6 +78,13 @@ class ShutdownHandler {
             } catch (Throwable e) { /* Ignore */ }
         }
 
+        // Stop FactEngine
+        if (context.getFactEngine() != null) {
+            try {
+                context.getFactEngine().shutdown();
+            } catch (Throwable e) { /* Ignore */ }
+        }
+
         if (context.getSessionService() instanceof AutoCloseable) {
             try {
                 ((AutoCloseable) context.getSessionService()).close();
