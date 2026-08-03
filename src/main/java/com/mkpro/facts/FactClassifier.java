@@ -16,31 +16,52 @@ public class FactClassifier {
     }
 
     /**
-     * Find math facts relevant to the given text.
-     * Returns facts whose keywords appear in the input.
+     * Find math facts relevant to the given text, ranked by keyword overlap.
+     * Returns top 3 most relevant facts (more matching keywords = higher rank).
      */
     public List<MathFact> findRelevantMathFacts(String text) {
         if (text == null || text.isBlank()) return Collections.emptyList();
 
         String lower = text.toLowerCase();
-        List<String> matchedKeywords = new ArrayList<>();
+        List<ScoredFact> scored = new ArrayList<>();
 
         for (MathFact fact : store.getAllMathFacts()) {
+            int matchCount = 0;
             for (String keyword : fact.getKeywords()) {
                 if (lower.contains(keyword)) {
-                    matchedKeywords.add(keyword);
-                    break;
+                    matchCount++;
                 }
+            }
+            if (matchCount > 0) {
+                // Score: matched keywords / total keywords (specificity bonus)
+                double score = (double) matchCount / fact.getKeywords().size();
+                // Bonus for multi-word keyword matches (more specific)
+                if (matchCount >= 2) score += 0.3;
+                scored.add(new ScoredFact(fact, score));
             }
         }
 
-        if (matchedKeywords.isEmpty()) return Collections.emptyList();
-        return store.findByKeywords(matchedKeywords);
+        if (scored.isEmpty()) return Collections.emptyList();
+
+        // Sort by score descending, take top 3
+        scored.sort((a, b) -> Double.compare(b.score, a.score));
+        int limit = Math.min(3, scored.size());
+        List<MathFact> results = new ArrayList<>();
+        for (int i = 0; i < limit; i++) {
+            results.add(scored.get(i).fact);
+        }
+        return results;
+    }
+
+    private static class ScoredFact {
+        final MathFact fact;
+        final double score;
+        ScoredFact(MathFact fact, double score) { this.fact = fact; this.score = score; }
     }
 
     /**
-     * Find relationship triples relevant to the given text.
-     * Matches subject or object mentions in the input.
+     * Find relationship triples relevant to the given text, ranked by specificity.
+     * Matches subject or object mentions. Caps at top 5.
      */
     public List<RelationshipTriple> findRelevantRelationships(String text) {
         if (text == null || text.isBlank()) return Collections.emptyList();
@@ -49,10 +70,17 @@ public class FactClassifier {
         List<RelationshipTriple> results = new ArrayList<>();
 
         for (RelationshipTriple triple : store.getAllRelationships()) {
-            if (lower.contains(triple.getSubject().toLowerCase()) ||
-                lower.contains(triple.getObject().toLowerCase())) {
+            boolean subjectMatch = lower.contains(triple.getSubject().toLowerCase());
+            boolean objectMatch = lower.contains(triple.getObject().toLowerCase());
+            // Require subject match (more specific than just object match)
+            if (subjectMatch) {
                 results.add(triple);
             }
+        }
+
+        // Cap at 5 to avoid noise
+        if (results.size() > 5) {
+            return results.subList(0, 5);
         }
         return results;
     }

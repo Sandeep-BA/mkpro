@@ -172,8 +172,10 @@ public class MakerLoop {
             if (factEngine != null) {
                 String facts = factEngine.getRelevantFacts(currentGoal.getGoalDescription());
                 if (facts != null) {
-                    if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Injected verified facts into context"));
-                    else System.out.println(ANSI_GREEN + "  [FactEngine] Injected verified facts into context" + ANSI_RESET);
+                    String preview = facts.replace("[VERIFIED FACTS]\n", "").replace("\n", " | ").trim();
+                    if (preview.length() > 120) preview = preview.substring(0, 120) + "...";
+                    if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Facts injected: " + preview));
+                    else System.out.println(ANSI_GREEN + "  [FactEngine] Facts injected: " + preview + ANSI_RESET);
                     return facts;
                 } else {
                     System.out.println(ANSI_DIM + "  [FactEngine] No relevant facts for: " + currentGoal.getGoalDescription().substring(0, Math.min(60, currentGoal.getGoalDescription().length())) + ANSI_RESET);
@@ -191,8 +193,10 @@ public class MakerLoop {
             String facts = factEngine.getRelevantFacts(currentGoal.getGoalDescription());
             if (facts != null) {
                 stimulus = stimulus + "\n" + facts;
-                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Injected verified facts into context"));
-                else System.out.println(ANSI_GREEN + "  [FactEngine] Injected verified facts into context" + ANSI_RESET);
+                String preview = facts.replace("[VERIFIED FACTS]\n", "").replace("\n", " | ").trim();
+                if (preview.length() > 120) preview = preview.substring(0, 120) + "...";
+                if (eventBus != null) eventBus.emit(com.mkpro.events.MkProEvent.system("Facts injected: " + preview));
+                else System.out.println(ANSI_GREEN + "  [FactEngine] Facts injected: " + preview + ANSI_RESET);
             }
         }
 
