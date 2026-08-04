@@ -226,12 +226,17 @@ public class FactEngine {
 
     private static final String FACTS_PREFIX = "facts:";
     private com.mkpro.CentralMemory centralMemory;
+    private String projectKey; // Scoped per project to prevent cross-project leakage
 
     /**
      * Set CentralMemory for persistence. Call after construction.
+     * @param memory The CentralMemory instance
      */
     public void setCentralMemory(com.mkpro.CentralMemory memory) {
         this.centralMemory = memory;
+        // Scope facts by project directory to prevent cross-project leakage
+        String projectDir = System.getProperty("user.dir");
+        this.projectKey = FACTS_PREFIX + Integer.toHexString(projectDir.hashCode()) + ":";
     }
 
     /**
@@ -256,7 +261,7 @@ public class FactEngine {
                     ));
                 }
             }
-            centralMemory.saveMemory(FACTS_PREFIX + "relationships", mapper.writeValueAsString(relList));
+            centralMemory.saveMemory(projectKey + "relationships", mapper.writeValueAsString(relList));
 
             // Save math facts
             List<Map<String, Object>> mathList = new ArrayList<>();
@@ -270,7 +275,7 @@ public class FactEngine {
                     mathList.add(m);
                 }
             }
-            centralMemory.saveMemory(FACTS_PREFIX + "math", mapper.writeValueAsString(mathList));
+            centralMemory.saveMemory(projectKey + "math", mapper.writeValueAsString(mathList));
         } catch (Exception e) {
             System.err.println("[FactEngine] Failed to persist project facts: " + e.getMessage());
         }
@@ -288,7 +293,7 @@ public class FactEngine {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
             // Load relationships
-            String relJson = centralMemory.getMemory(FACTS_PREFIX + "relationships");
+            String relJson = centralMemory.getMemory(projectKey + "relationships");
             if (relJson != null && !relJson.isBlank()) {
                 List<Map<String, Object>> relList = mapper.readValue(relJson,
                     mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
@@ -305,7 +310,7 @@ public class FactEngine {
             }
 
             // Load math facts
-            String mathJson = centralMemory.getMemory(FACTS_PREFIX + "math");
+            String mathJson = centralMemory.getMemory(projectKey + "math");
             if (mathJson != null && !mathJson.isBlank()) {
                 List<Map<String, Object>> mathList = mapper.readValue(mathJson,
                     mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
