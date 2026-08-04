@@ -98,6 +98,8 @@
             <groupId>com.github.tjake</groupId>
             <artifactId>jlama-native</artifactId>
             <version>0.8.4</version>
+            <!-- Platform-specific: linux-x86_64, macos-x86_64, macos-aarch_64, windows-x86_64 -->
+            <classifier>windows-x86_64</classifier>
         </dependency>
 
         <!-- PDF Text Extraction -->
