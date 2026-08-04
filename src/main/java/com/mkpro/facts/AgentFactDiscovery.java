@@ -38,20 +38,35 @@ public class AgentFactDiscovery {
 
         if (llmCallback == null || factEngine == null) return 0;
 
-        // 1. Pick the most important files to analyze
-        List<Path> keyFiles = selectKeyFiles(projectRoot);
+        // 1. Build the file tree
+        GitIgnoreFilter gitIgnore = new GitIgnoreFilter(projectRoot);
+        List<String> fileTree = buildFileTree(projectRoot, gitIgnore);
 
-        System.out.println("\u001b[36m  [Deep Discovery] Analyzing " + keyFiles.size() + " key file(s)...\u001b[0m");
+        if (fileTree.isEmpty()) {
+            System.out.println("\u001b[33m  [Deep Discovery] No files found in project.\u001b[0m");
+            return 0;
+        }
 
-        // 2. Analyze each file
-        for (Path file : keyFiles) {
+        // 2. Ask LLM to pick the most important files
+        List<String> selectedFiles = askLlmToPickFiles(fileTree);
+
+        if (selectedFiles.isEmpty()) {
+            System.out.println("\u001b[33m  [Deep Discovery] LLM selected no files for analysis.\u001b[0m");
+            return 0;
+        }
+
+        System.out.println("\u001b[36m  [Deep Discovery] Analyzing " + selectedFiles.size() + " key file(s)...\u001b[0m");
+
+        // 3. Analyze each selected file
+        for (String relativePath : selectedFiles) {
+            Path file = projectRoot.resolve(relativePath);
+            if (!Files.exists(file) || !Files.isRegularFile(file)) continue;
+
             try {
                 String content = readTruncated(file, MAX_FILE_SIZE);
                 if (content == null || content.isBlank()) continue;
 
-                String relativePath = projectRoot.relativize(file).toString();
                 System.out.println("\u001b[90m    Analyzing: " + relativePath + "\u001b[0m");
-
                 analyzeFile(relativePath, content);
             } catch (Exception e) {
                 // Skip problematic files
@@ -62,35 +77,25 @@ public class AgentFactDiscovery {
     }
 
     /**
-     * Select the most important files for analysis.
-     * Priority: README > main config > entry points > core classes
+     * Build a file tree listing (respecting .gitignore), capped at 500 entries.
      */
-    private List<Path> selectKeyFiles(Path root) {
-        List<ScoredFile> candidates = new ArrayList<>();
-        GitIgnoreFilter gitIgnore = new GitIgnoreFilter(root);
-
+    private List<String> buildFileTree(Path root, GitIgnoreFilter gitIgnore) {
+        List<String> tree = new ArrayList<>();
         try {
-            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), 8, new SimpleFileVisitor<>() {
+            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), 10, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (attrs.size() > 200_000 || attrs.size() < 50) return FileVisitResult.CONTINUE;
+                    if (tree.size() >= 500) return FileVisitResult.TERMINATE;
+                    if (attrs.size() > 500_000 || attrs.size() < 10) return FileVisitResult.CONTINUE;
                     if (gitIgnore.isIgnored(file)) return FileVisitResult.CONTINUE;
 
-                    String name = file.getFileName().toString().toLowerCase();
-                    String relative = root.relativize(file).toString().toLowerCase().replace('\\', '/');
-                    int score = scoreFile(name, relative);
-
-                    if (score > 0) {
-                        candidates.add(new ScoredFile(file, score));
-                    }
+                    tree.add(root.relativize(file).toString().replace('\\', '/'));
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (!gitIgnore.shouldEnterDirectory(dir)) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
+                    if (!gitIgnore.shouldEnterDirectory(dir)) return FileVisitResult.SKIP_SUBTREE;
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -100,51 +105,57 @@ public class AgentFactDiscovery {
                 }
             });
         } catch (IOException e) { /* skip */ }
-
-        // Sort by score descending, take top N
-        candidates.sort((a, b) -> Integer.compare(b.score, a.score));
-        List<Path> result = new ArrayList<>();
-        for (int i = 0; i < Math.min(MAX_FILES_TO_ANALYZE, candidates.size()); i++) {
-            result.add(candidates.get(i).path);
-        }
-        return result;
+        return tree;
     }
 
-    private int scoreFile(String name, String relativePath) {
-        // README files — highest value
-        if (name.startsWith("readme")) return 100;
-
-        // Architecture/design docs
-        if (name.contains("architecture") || name.contains("design")) return 90;
-
-        // Main entry points
-        if (name.equals("main.java") || name.equals("app.java") || name.equals("application.java")) return 85;
-        if (name.equals("main.py") || name.equals("app.py")) return 85;
-        if (name.equals("index.ts") || name.equals("index.js") || name.equals("main.ts")) return 85;
-
-        // Config files
-        if (name.equals("application.yaml") || name.equals("application.yml")) return 80;
-        if (name.equals("application.properties")) return 80;
-        if (name.equals("docker-compose.yaml") || name.equals("docker-compose.yml")) return 78;
-        if (name.equals("dockerfile")) return 75;
-
-        // Infrastructure
-        if (name.endsWith(".tf")) return 70; // Terraform
-        if (name.contains("kubernetes") || name.contains("k8s")) return 70;
-
-        // Core source files (in src/main not test)
-        if (relativePath.contains("src/main") && !relativePath.contains("test")) {
-            if (name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".ts")) {
-                // Service/Controller/Repository classes
-                if (name.contains("service") || name.contains("controller") || name.contains("repository")) return 60;
-                if (name.contains("config") || name.contains("module")) return 55;
-            }
+    /**
+     * Ask LLM to select the most important files from the tree.
+     */
+    private List<String> askLlmToPickFiles(List<String> fileTree) {
+        String treeText = String.join("\n", fileTree);
+        if (treeText.length() > 6000) {
+            treeText = treeText.substring(0, 6000) + "\n... (truncated)";
         }
 
-        // Python/JS project roots
-        if (name.equals("setup.py") || name.equals("pyproject.toml")) return 65;
+        String prompt = "Here is a project's file listing:\n\n" + treeText + "\n\n" +
+            "Select the " + MAX_FILES_TO_ANALYZE + " most important files for understanding this project's " +
+            "architecture, dependencies, technology relationships, configuration constraints, and any mathematical/scientific formulas.\n\n" +
+            "Prioritize:\n" +
+            "- README and documentation\n" +
+            "- Dependency manifests (pom.xml, package.json, go.mod, etc.)\n" +
+            "- Main entry points and core business logic\n" +
+            "- Configuration files with limits/thresholds\n" +
+            "- Infrastructure definitions (Docker, K8s, Terraform)\n\n" +
+            "Respond with ONLY the file paths, one per line. No numbering, no explanation.";
 
-        return 0; // Not important enough
+        String response = llmCallback.apply(prompt);
+        if (response == null || response.isBlank()) return Collections.emptyList();
+
+        List<String> selected = new ArrayList<>();
+        Set<String> fileTreeSet = new HashSet<>(fileTree);
+
+        for (String line : response.split("\n")) {
+            String path = line.trim().replaceAll("^[\\d.\\-*]+\\s*", ""); // Strip numbering/bullets
+            path = path.replaceAll("^`|`$", ""); // Strip backticks
+            if (path.isEmpty()) continue;
+
+            // Match against actual file tree (exact or fuzzy)
+            if (fileTreeSet.contains(path)) {
+                selected.add(path);
+            } else {
+                // Try fuzzy match (LLM might format slightly differently)
+                for (String actual : fileTree) {
+                    if (actual.endsWith(path) || actual.replace('/', '\\').endsWith(path)) {
+                        selected.add(actual);
+                        break;
+                    }
+                }
+            }
+
+            if (selected.size() >= MAX_FILES_TO_ANALYZE) break;
+        }
+
+        return selected;
     }
 
     private void analyzeFile(String relativePath, String content) {
@@ -244,5 +255,4 @@ public class AgentFactDiscovery {
         return content;
     }
 
-    private record ScoredFile(Path path, int score) {}
 }

@@ -43,6 +43,9 @@ public class GitIgnoreFilter {
      * @return true if the path should be skipped
      */
     public boolean isIgnored(Path path) {
+        // Never ignore the root itself
+        if (path.equals(root)) return false;
+
         // Check always-ignored directories
         String fileName = path.getFileName().toString();
         if (Files.isDirectory(path) && ALWAYS_IGNORED.contains(fileName)) {
@@ -51,6 +54,8 @@ public class GitIgnoreFilter {
 
         // Check .gitignore rules
         String relativePath = root.relativize(path).toString().replace('\\', '/');
+        if (relativePath.isEmpty()) return false;
+
         boolean ignored = false;
 
         for (IgnoreRule rule : rules) {
@@ -72,6 +77,7 @@ public class GitIgnoreFilter {
      * Check if a directory should be entered during tree walk.
      */
     public boolean shouldEnterDirectory(Path dir) {
+        if (dir.equals(root)) return true; // Always enter root
         String name = dir.getFileName().toString();
         if (ALWAYS_IGNORED.contains(name)) return false;
         return !isIgnored(dir);

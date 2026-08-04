@@ -50,6 +50,7 @@ public class FactsCommand implements Command {
             case "verify" -> verifyMath(args, engine);
             case "check" -> checkRelationship(args, engine);
             case "query" -> queryRelationships(args, engine);
+            case "project" -> showProjectFacts(engine);
             default -> showStats(engine);
         }
     }
@@ -57,10 +58,25 @@ public class FactsCommand implements Command {
     private void showStats(FactEngine engine) {
         System.out.println(ANSI_CYAN + "\n── Verified Facts Status ──" + ANSI_RESET);
         System.out.println("  " + engine.getStats());
+
+        // Count project-specific facts
+        int projectRels = 0;
+        int projectMath = 0;
+        for (var edge : engine.getGraph().getAllEdges()) {
+            if (edge.domain != null && edge.domain.startsWith("project")) projectRels++;
+        }
+        for (var fact : engine.getStore().getAllMathFacts()) {
+            if (fact.getKey().startsWith("project.")) projectMath++;
+        }
+        if (projectRels > 0 || projectMath > 0) {
+            System.out.println("  Project-specific: " + projectRels + " relationships, " + projectMath + " formulas");
+        }
+
         System.out.println();
         System.out.println("  Commands:");
         System.out.println("    /facts math              List all math formulas");
         System.out.println("    /facts rels              List all relationship domains");
+        System.out.println("    /facts project           Show project-discovered facts");
         System.out.println("    /facts verify <key> <vars>  Compute a formula");
         System.out.println("    /facts check <s> <p> <o>    Check a relationship");
         System.out.println("    /facts query <subject>      Query relationships");
@@ -167,5 +183,34 @@ public class FactsCommand implements Command {
                 System.out.println("    " + rel);
             }
         }
+    }
+
+    private void showProjectFacts(FactEngine engine) {
+        System.out.println(ANSI_CYAN + "\n── Project-Discovered Facts ──" + ANSI_RESET);
+
+        // Show project relationships
+        boolean hasAny = false;
+        System.out.println(ANSI_GREEN + "\n  Relationships:" + ANSI_RESET);
+        for (var edge : engine.getGraph().getAllEdges()) {
+            if (edge.domain != null && edge.domain.startsWith("project")) {
+                String confidence = edge.confidence < 1.0 ? " (" + (int)(edge.confidence * 100) + "%)" : "";
+                System.out.println("    " + edge.domain + ": " + ANSI_DIM + "--" + edge.predicate + "--> " + edge.target + confidence + ANSI_RESET);
+                hasAny = true;
+            }
+        }
+
+        // Show project math facts
+        System.out.println(ANSI_GREEN + "\n  Formulas/Constants:" + ANSI_RESET);
+        for (MathFact fact : engine.getStore().getAllMathFacts()) {
+            if (fact.getKey().startsWith("project.")) {
+                System.out.println("    " + fact.getKey() + ": " + ANSI_DIM + fact.getFormula() + ANSI_RESET);
+                hasAny = true;
+            }
+        }
+
+        if (!hasAny) {
+            System.out.println(ANSI_YELLOW + "\n  No project facts discovered yet. Run /index or /index deep to scan." + ANSI_RESET);
+        }
+        System.out.println();
     }
 }
