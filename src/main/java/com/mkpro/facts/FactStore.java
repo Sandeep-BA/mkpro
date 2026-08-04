@@ -17,6 +17,7 @@ public class FactStore {
     private final Map<String, MathFact> mathFacts = new ConcurrentHashMap<>();
     private final List<RelationshipTriple> relationships = new ArrayList<>();
     private final Map<String, List<String>> keywordIndex = new ConcurrentHashMap<>(); // keyword → list of fact keys
+    private Set<String> stopWords = Set.of(); // loaded from YAML
 
     public void load() {
         try (InputStream is = getClass().getResourceAsStream("/facts.yaml")) {
@@ -26,6 +27,7 @@ public class FactStore {
             }
             ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
             JsonNode root = yaml.readTree(is);
+            loadStopWords(root.get("stop_words"));
             loadMathFacts(root.get("math"));
             loadMathFacts(root.get("physics"));
             loadMathFacts(root.get("cs"));
@@ -33,6 +35,19 @@ public class FactStore {
         } catch (Exception e) {
             System.err.println("[FactStore] Error loading facts.yaml: " + e.getMessage());
         }
+    }
+
+    private void loadStopWords(JsonNode node) {
+        if (node == null || !node.isArray()) return;
+        Set<String> words = new java.util.HashSet<>();
+        for (JsonNode word : node) {
+            words.add(word.asText().toLowerCase());
+        }
+        stopWords = Collections.unmodifiableSet(words);
+    }
+
+    public Set<String> getStopWords() {
+        return stopWords;
     }
 
     private void loadMathFacts(JsonNode mathNode) {

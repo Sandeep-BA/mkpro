@@ -81,6 +81,7 @@ class ShutdownHandler {
         // Stop FactEngine
         if (context.getFactEngine() != null) {
             try {
+                context.getFactEngine().persistProjectFacts();
                 context.getFactEngine().shutdown();
             } catch (Throwable e) { /* Ignore */ }
         }

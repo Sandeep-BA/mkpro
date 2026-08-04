@@ -42,7 +42,7 @@ public class FactEngine {
 
         StringBuilder sb = new StringBuilder();
 
-        // Math facts
+        // Math facts (static YAML)
         List<MathFact> mathFacts = classifier.findRelevantMathFacts(text);
         if (!mathFacts.isEmpty()) {
             sb.append("[VERIFIED FACTS]\n");
@@ -55,7 +55,7 @@ public class FactEngine {
             }
         }
 
-        // Relationship facts
+        // Relationship facts (static YAML)
         List<RelationshipTriple> rels = classifier.findRelevantRelationships(text);
         if (!rels.isEmpty()) {
             if (sb.length() == 0) sb.append("[VERIFIED FACTS]\n");
@@ -66,6 +66,16 @@ public class FactEngine {
                     sb.append("  • ").append(line).append("\n");
                 }
                 if (seen.size() >= 5) break; // Cap at 5 relationships to avoid noise
+            }
+        }
+
+        // Project-discovered facts: search graph edges where target contains query keywords
+        List<String> projectFacts = findProjectFacts(text);
+        if (!projectFacts.isEmpty()) {
+            if (sb.length() == 0) sb.append("[VERIFIED FACTS]\n");
+            sb.append("  [Project]\n");
+            for (String pf : projectFacts) {
+                sb.append("  • ").append(pf).append("\n");
             }
         }
 
@@ -210,6 +220,150 @@ public class FactEngine {
 
     public void shutdown() {
         evaluator.shutdown();
+    }
+
+    // ═══ Persistence via CentralMemory ═══
+
+    private static final String FACTS_PREFIX = "facts:";
+    private com.mkpro.CentralMemory centralMemory;
+
+    /**
+     * Set CentralMemory for persistence. Call after construction.
+     */
+    public void setCentralMemory(com.mkpro.CentralMemory memory) {
+        this.centralMemory = memory;
+    }
+
+    /**
+     * Persist all project-discovered facts to CentralMemory.
+     * Called on shutdown or after /index.
+     */
+    public void persistProjectFacts() {
+        if (centralMemory == null) return;
+
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+            // Save relationships
+            List<Map<String, Object>> relList = new ArrayList<>();
+            for (RelationshipGraph.Edge edge : graph.getAllEdges()) {
+                if (edge.domain != null && edge.domain.startsWith("project")) {
+                    relList.add(Map.of(
+                        "predicate", edge.predicate,
+                        "target", edge.target,
+                        "domain", edge.domain,
+                        "confidence", edge.confidence
+                    ));
+                }
+            }
+            centralMemory.saveMemory(FACTS_PREFIX + "relationships", mapper.writeValueAsString(relList));
+
+            // Save math facts
+            List<Map<String, Object>> mathList = new ArrayList<>();
+            for (MathFact fact : store.getAllMathFacts()) {
+                if (fact.getKey().startsWith("project.")) {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("key", fact.getKey());
+                    m.put("formula", fact.getFormula());
+                    m.put("keywords", fact.getKeywords());
+                    if (fact.getScript() != null) m.put("script", fact.getScript());
+                    mathList.add(m);
+                }
+            }
+            centralMemory.saveMemory(FACTS_PREFIX + "math", mapper.writeValueAsString(mathList));
+        } catch (Exception e) {
+            System.err.println("[FactEngine] Failed to persist project facts: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Load persisted project facts from CentralMemory.
+     * Called on startup after FactEngine is created.
+     */
+    @SuppressWarnings("unchecked")
+    public void loadPersistedFacts() {
+        if (centralMemory == null) return;
+
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+            // Load relationships
+            String relJson = centralMemory.getMemory(FACTS_PREFIX + "relationships");
+            if (relJson != null && !relJson.isBlank()) {
+                List<Map<String, Object>> relList = mapper.readValue(relJson,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+                for (Map<String, Object> m : relList) {
+                    RelationshipTriple triple = new RelationshipTriple();
+                    triple.setSubject("project");
+                    triple.setPredicate((String) m.get("predicate"));
+                    triple.setObject((String) m.get("target"));
+                    triple.setDomain((String) m.get("domain"));
+                    double confidence = m.containsKey("confidence") ? ((Number) m.get("confidence")).doubleValue() : 0.9;
+                    store.addRelationship(triple);
+                    graph.addTriple(triple, confidence);
+                }
+            }
+
+            // Load math facts
+            String mathJson = centralMemory.getMemory(FACTS_PREFIX + "math");
+            if (mathJson != null && !mathJson.isBlank()) {
+                List<Map<String, Object>> mathList = mapper.readValue(mathJson,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+                for (Map<String, Object> m : mathList) {
+                    MathFact fact = new MathFact();
+                    fact.setKey((String) m.get("key"));
+                    fact.setFormula((String) m.get("formula"));
+                    fact.setKeywords(m.containsKey("keywords") ? (List<String>) m.get("keywords") : List.of());
+                    fact.setScript(m.containsKey("script") ? (String) m.get("script") : null);
+                    store.addMathFact(fact);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[FactEngine] Failed to load persisted facts: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Search project-discovered facts in the graph for keyword matches.
+     * Looks at edge targets (objects) and domains for query term overlap.
+     */
+    private List<String> findProjectFacts(String text) {
+        if (text == null || text.isBlank()) return Collections.emptyList();
+
+        String lower = text.toLowerCase();
+        // Extract meaningful words (skip short/common words)
+        String[] words = lower.split("[\\s,;.!?()\"']+");
+        List<String> keywords = new ArrayList<>();
+        for (String w : words) {
+            if (w.length() >= 3 && !isStopWord(w)) {
+                keywords.add(w);
+            }
+        }
+        if (keywords.isEmpty()) return Collections.emptyList();
+
+        List<String> results = new ArrayList<>();
+        for (RelationshipGraph.Edge edge : graph.getAllEdges()) {
+            // Only search project-discovered facts
+            if (edge.domain == null || !edge.domain.startsWith("project")) continue;
+
+            String edgeText = (edge.target + " " + edge.predicate + " " + edge.domain).toLowerCase();
+            int matchCount = 0;
+            for (String kw : keywords) {
+                if (edgeText.contains(kw)) matchCount++;
+            }
+
+            // Require at least 1 keyword match in the edge content
+            if (matchCount > 0) {
+                results.add(edge.domain.replace("project:", "") + ": " + edge.predicate + " → " + edge.target);
+            }
+
+            if (results.size() >= 5) break; // Cap at 5 project facts
+        }
+        return results;
+    }
+
+    private boolean isStopWord(String word) {
+        return store.getStopWords().contains(word);
     }
 
     /**

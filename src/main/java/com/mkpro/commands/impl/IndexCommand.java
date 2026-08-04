@@ -53,6 +53,11 @@ public class IndexCommand implements Command {
         } else if (deep && context.getRunner() == null) {
             System.out.println("\u001b[33m  --deep requires an active LLM runner.\u001b[0m");
         }
+
+        // Persist discovered facts to MapDB
+        if (context.getFactEngine() != null) {
+            context.getFactEngine().persistProjectFacts();
+        }
     }
 
     @Override

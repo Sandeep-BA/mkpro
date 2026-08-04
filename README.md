@@ -92,7 +92,7 @@ agents:
     tools: [file_read, file_write, safe_write, clipboard, shell, selenium]
 ```
 
-Available tool names: `file_read`, `file_write`, `safe_write`, `clipboard`, `shell`, `image`, `codebase_search`, `multi_project_search`, `mcp_scan`, `graph_memory`, `fetch_url`, `stats`, `selenium`, `scripting`.
+Available tool names: `file_read`, `file_write`, `safe_write`, `clipboard`, `shell`, `image`, `codebase_search`, `multi_project_search`, `mcp_scan`, `graph_memory`, `fetch_url`, `stats`, `selenium`, `scripting`, `verify_fact`.
 
 YAMLs without a `tools` field fall back to name-based assignment for backward compatibility.
 
@@ -173,6 +173,9 @@ For detailed mTLS procedures, refer to:
 
 - **Web UI**: Optional browser-based chat interface (`--web` flag). Markdown rendering, syntax highlighting, real-time streaming via WebSocket. Commands work from web too. Includes MapDB browser (`/db`) and Knowledge dashboard (`/knowledge`).
 - **Groovy Script Engine**: Sandboxed Groovy execution for data processing. Agents use `execute_script`, `create_script`, `list_scripts` tools. Scripts persist in CentralMemory, blocked from Runtime/ProcessBuilder/Thread/networking. 30s timeout.
+- **Fact Engine**: Verified math formulas (77 with Groovy scripts) + relationship graph (151+ triples). Pre-turn injection of relevant facts, post-turn validation for conflicts. Agents use `verify_fact` tool to compute formulas or check technology relationships. Confidence-scored edges (1.0 static, 0.8 extracted, 0.9 project). See [FactEngine docs](README_fe.md).
+- **Project Fact Discovery**: `/index` scans source files for constants, dependencies, config constraints. `/index --deep` uses LLM to analyze key files for architectural patterns, formulas, and relationships. Discovered facts persist to MapDB across sessions.
+- **Knowledge → Fact Pipeline**: Knowledge Scheduler fetches docs → FactExtractor extracts structured S-P-O triples and formulas → feeds into Fact Engine graph. The system gets smarter with each knowledge refresh.
 - **Graph Memory & Visualization**: Agents store structured associative memories in a MapDB-backed graph, viewable via `/visualize`.
 - **Mesh Networking**: Multiple mkpro instances discover each other via mDNS and synchronize memory/graph states in real-time. Automatic reconnection with exponential backoff.
 - **Cross-Instance Agent Communication**: Agents can directly ask agents on peer instances for help. Architect on Instance A can query Architect on Instance B about its project. Peer handshake exchanges project info on connection.
@@ -217,7 +220,15 @@ For detailed mTLS procedures, refer to:
 | `/stats` | View token usage statistics |
 | `/visualize` | Visualize the graph memory |
 | `/mcp` | Manage MCP server connections |
-| `/index` | Index project files for semantic search |
+| `/index` | Index project files for semantic search + fact discovery |
+| `/index --deep` | Deep analysis: LLM picks key files, extracts facts/formulas/relationships |
+| `/facts` | Show Fact Engine stats (math facts, relationships, project facts) |
+| `/facts math` | List all math formulas |
+| `/facts rels` | List all relationship triples |
+| `/facts project` | Show project-discovered facts |
+| `/facts verify <key> <vars>` | Compute a formula (e.g., `/facts verify circle_area r=5`) |
+| `/facts check <s> <p> <o>` | Check a relationship (e.g., `/facts check HPA requires metrics-server`) |
+| `/facts query <subject>` | Query all relationships for a subject |
 | `/model` | Switch models |
 | `/runner` | Switch execution runner type |
 | `/network` | Manage mesh networking peers |
@@ -328,19 +339,19 @@ export AWS_REGION=your_region
 
 Launch the CLI:
 ```bash
-java -jar target/mkpro-4.1.1.jar
+java -jar target/mkpro-4.1.2.jar
 ```
 
 With Web UI (opens browser chat at http://localhost:8080):
 ```bash
-java -jar target/mkpro-4.1.1.jar --web
-java -jar target/mkpro-4.1.1.jar --web 9090   # custom port
+java -jar target/mkpro-4.1.2.jar --web
+java -jar target/mkpro-4.1.2.jar --web 9090   # custom port
 ```
 
 With Knowledge Scheduler (autonomous knowledge accumulation):
 ```bash
-java -jar target/mkpro-4.1.1.jar --scheduler
-java -jar target/mkpro-4.1.1.jar --web --scheduler   # both web UI + scheduler
+java -jar target/mkpro-4.1.2.jar --scheduler
+java -jar target/mkpro-4.1.2.jar --web --scheduler   # both web UI + scheduler
 ```
 
 Or use the native executable (Windows):
@@ -453,6 +464,7 @@ data: {"type":"stream_end"}
 
 - **[Knowledge Scheduler](README_knowledge.md)** — Autonomous topic-based knowledge accumulation, TF-IDF search, topic discovery, confidence scoring, and the self-improving flywheel.
 - **[Markov Chain Router](README_markov.md)** — Intent classification, transition probability matrix, learned patterns, stall prediction, and training pipeline.
+- **[Fact Engine](README_fe.md)** — Verified math formulas, relationship graph, Groovy verification scripts, Knowledge→Fact pipeline, project fact discovery, and confidence scoring.
 
 ## 🤝 Contributing
 

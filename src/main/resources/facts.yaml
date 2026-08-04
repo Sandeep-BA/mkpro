@@ -1,6 +1,62 @@
 # mkpro Verified Facts Database
 # Math formulas with Groovy verification scripts + Relationship triples
 
+stop_words:
+  - the
+  - and
+  - for
+  - are
+  - was
+  - were
+  - been
+  - being
+  - have
+  - has
+  - had
+  - does
+  - did
+  - will
+  - would
+  - could
+  - should
+  - may
+  - might
+  - shall
+  - can
+  - need
+  - with
+  - from
+  - this
+  - that
+  - these
+  - those
+  - where
+  - when
+  - what
+  - which
+  - who
+  - how
+  - all
+  - any
+  - some
+  - not
+  - but
+  - also
+  - about
+  - into
+  - than
+  - then
+  - just
+  - only
+  - delegate
+  - please
+  - help
+  - tell
+  - show
+  - find
+  - get
+  - use
+
 math:
   geometry:
     circle_area:
