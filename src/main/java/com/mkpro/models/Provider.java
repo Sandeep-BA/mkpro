@@ -9,4 +9,5 @@ public enum Provider implements Serializable {
     SARVAM,
     AZURE,
     NVIDIA,
+    JLAMA,
 }

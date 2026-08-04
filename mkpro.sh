@@ -20,4 +20,4 @@ if [ ! -f "$JAR_PATH" ]; then
 fi
 
 # Run the application
-java -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" "$@"
+java --add-modules jdk.incubator.vector -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" "$@"

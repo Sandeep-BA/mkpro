@@ -226,6 +226,9 @@ public class AgentManager {
                     return new SarvamBaseLM(config.getModelName());
                 case NVIDIA:
                     return new NvidiaBaseLM(config.getModelName());
+                case JLAMA:
+                    String jlamaModelsDir = System.getProperty("user.home") + "/Documents/mkpro/jlama-models";
+                    return new com.mkpro.models.JlamaProvider(config.getModelName(), jlamaModelsDir);
                 default:
                     return null;
             }

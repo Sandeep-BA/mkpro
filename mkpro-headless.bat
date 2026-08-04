@@ -20,6 +20,6 @@ echo   Runner:    MAP_DB (persistent)
 echo   Web UI:    http://localhost:8080
 echo   Knowledge: http://localhost:8080/knowledge
 echo   DB Browser: http://localhost:8080/db
-java -Dmkpro.db.name=%~n0 -jar "%JAR_PATH%" --runner MAP_DB --web --scheduler %*
+java -Dmkpro.db.name=%~n0 --add-modules jdk.incubator.vector -jar "%JAR_PATH%" --runner MAP_DB --web --scheduler %*
 
 endlocal

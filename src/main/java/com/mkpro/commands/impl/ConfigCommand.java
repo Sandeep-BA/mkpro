@@ -138,6 +138,7 @@ public class ConfigCommand implements Command {
         providers.add("SARVAM");
         providers.add("AZURE");
         providers.add("NVIDIA");
+        providers.add("JLAMA");
         
         String providerChoice = ConsoleUtils.selectOption(context, "Select a provider:", providers);
         if (providerChoice == null) return;
@@ -249,6 +250,16 @@ public class ConfigCommand implements Command {
             case "BEDROCK": return ModelRegistry.BEDROCK_MODELS;
             case "AZURE": return ModelRegistry.AZURE_MODELS;
             case "OLLAMA": return ModelRegistry.OLLAMA_MODELS;
+            case "JLAMA":
+                com.mkpro.models.JlamaModelRegistry registry = new com.mkpro.models.JlamaModelRegistry();
+                List<String> jlamaModels = new ArrayList<>();
+                for (com.mkpro.models.JlamaModelRegistry.ModelInfo info : registry.listModels()) {
+                    jlamaModels.add(info.name());
+                }
+                if (jlamaModels.isEmpty()) {
+                    System.out.println("\u001b[33m  No Jlama models downloaded. Use /jlama download <model> first.\u001b[0m");
+                }
+                return jlamaModels;
             default: return Arrays.asList();
         }
     }

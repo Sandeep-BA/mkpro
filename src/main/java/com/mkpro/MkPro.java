@@ -177,6 +177,7 @@ public class MkPro {
         registry.register(new WebCommand());
         registry.register(new SchedulerCommand());
         registry.register(new FactsCommand());
+        registry.register(new JlamaCommand());
         registry.register(new HelpCommand(registry));
         registry.register(new ExitCommand());
         // /quit is an alias for /exit

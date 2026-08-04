@@ -88,6 +88,18 @@
             <version>4.0.22</version>
         </dependency>
 
+        <!-- Jlama: Pure Java LLM Inference -->
+        <dependency>
+            <groupId>com.github.tjake</groupId>
+            <artifactId>jlama-core</artifactId>
+            <version>0.8.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.tjake</groupId>
+            <artifactId>jlama-native</artifactId>
+            <version>0.8.4</version>
+        </dependency>
+
         <!-- PDF Text Extraction -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

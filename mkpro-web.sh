@@ -21,4 +21,4 @@ fi
 
 # Run with web UI enabled (default port 8080, WS on 8081)
 echo "Starting mkpro with Web UI at http://localhost:8080"
-java -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --web "$@"
+java --add-modules jdk.incubator.vector -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --web "$@"
