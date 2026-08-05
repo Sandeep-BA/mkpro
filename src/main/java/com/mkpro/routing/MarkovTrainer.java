@@ -143,7 +143,7 @@ public class MarkovTrainer {
     private static final java.util.Set<String> VALID_AGENTS = java.util.Set.of(
         "Coordinator", "GoalTracker", "Coder", "CodeEditor", "SysAdmin", "GitAgent",
         "Tester", "DocWriter", "SecurityAuditor", "Architect", "DatabaseAdmin",
-        "DevOps", "DataAnalyst", "AndroidDev", "IosDev"
+        "DevOps", "DataAnalyst", "AndroidDev", "IosDev", "ProductManager"
     );
 
     /**
@@ -367,6 +367,7 @@ public class MarkovTrainer {
             case "AndroidDev": return IntentClassifier.TaskCategory.ANDROID;
             case "IosDev": return IntentClassifier.TaskCategory.IOS;
             case "GoalTracker": return IntentClassifier.TaskCategory.GOALS;
+            case "ProductManager": return IntentClassifier.TaskCategory.PRODUCT;
             default: return IntentClassifier.TaskCategory.GENERAL;
         }
     }
