@@ -173,6 +173,7 @@ public class JlamaProvider extends BaseLlm {
 
     /**
      * Build PromptContext from ADK LlmRequest (system instructions + content history).
+     * Automatically truncates if prompt exceeds model's context window.
      */
     private PromptContext buildPromptContext(LlmRequest request) {
         // Extract system instruction
@@ -190,6 +191,34 @@ public class JlamaProvider extends BaseLlm {
                             userMessage.append(part.text().get()).append("\n");
                         }
                     }
+                }
+            }
+        }
+
+        // Get context window size and reserve space for output
+        int contextLength = loadedModel.getConfig().contextLength;
+        int maxPromptTokens = contextLength - Math.min(DEFAULT_MAX_TOKENS, contextLength / 4);
+
+        // Estimate tokens (~4 chars per token) and truncate if needed
+        int estimatedTokens = (systemPrompt.length() + userMessage.length()) / 4;
+        if (estimatedTokens > maxPromptTokens) {
+            logger.info("[Jlama] Prompt too large ({} est. tokens, max {}). Truncating.", estimatedTokens, maxPromptTokens);
+            int maxChars = maxPromptTokens * 4;
+
+            // Prioritize user message over system prompt for small models
+            if (userMessage.length() > maxChars / 2) {
+                // Truncate system prompt aggressively, keep user message
+                int sysMax = Math.min(systemPrompt.length(), maxChars / 4);
+                systemPrompt = systemPrompt.substring(0, sysMax) + "\n[System prompt truncated for context limit]";
+                int userMax = maxChars - systemPrompt.length();
+                if (userMessage.length() > userMax) {
+                    userMessage = new StringBuilder(userMessage.substring(userMessage.length() - userMax));
+                }
+            } else {
+                // Truncate system prompt to fit
+                int sysMax = maxChars - userMessage.length();
+                if (systemPrompt.length() > sysMax) {
+                    systemPrompt = systemPrompt.substring(0, sysMax) + "\n[System prompt truncated for context limit]";
                 }
             }
         }

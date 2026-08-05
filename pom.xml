@@ -92,14 +92,7 @@
         <dependency>
             <groupId>com.github.tjake</groupId>
             <artifactId>jlama-core</artifactId>
-            <version>0.8.4</version>
-        </dependency>
-        <dependency>
-            <groupId>com.github.tjake</groupId>
-            <artifactId>jlama-native</artifactId>
-            <version>0.8.4</version>
-            <!-- Platform-specific: linux-x86_64, macos-x86_64, macos-aarch_64, windows-x86_64 -->
-            <classifier>windows-x86_64</classifier>
+            <version>0.9.0-beta</version>
         </dependency>
 
         <!-- PDF Text Extraction -->

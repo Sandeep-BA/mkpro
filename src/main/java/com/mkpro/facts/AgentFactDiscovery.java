@@ -47,6 +47,8 @@ public class AgentFactDiscovery {
             return 0;
         }
 
+        System.out.println("\u001b[90m  [Deep Discovery] File tree: " + fileTree.size() + " files\u001b[0m");
+
         // 2. Ask LLM to pick the most important files
         List<String> selectedFiles = askLlmToPickFiles(fileTree);
 
@@ -55,7 +57,10 @@ public class AgentFactDiscovery {
             return 0;
         }
 
-        System.out.println("\u001b[36m  [Deep Discovery] Analyzing " + selectedFiles.size() + " key file(s)...\u001b[0m");
+        System.out.println("\u001b[36m  [Deep Discovery] Analyzing " + selectedFiles.size() + " key file(s):\u001b[0m");
+        for (String f : selectedFiles) {
+            System.out.println("\u001b[90m    → " + f + "\u001b[0m");
+        }
 
         // 3. Analyze each selected file
         for (String relativePath : selectedFiles) {
@@ -66,7 +71,6 @@ public class AgentFactDiscovery {
                 String content = readTruncated(file, MAX_FILE_SIZE);
                 if (content == null || content.isBlank()) continue;
 
-                System.out.println("\u001b[90m    Analyzing: " + relativePath + "\u001b[0m");
                 analyzeFile(relativePath, content);
             } catch (Exception e) {
                 // Skip problematic files
@@ -76,18 +80,31 @@ public class AgentFactDiscovery {
         return factsAdded;
     }
 
+    // Directories to always skip (build artifacts, dependencies, caches)
+    private static final Set<String> SKIP_DIRS = Set.of(
+        "node_modules", ".git", "vendor", "dist", "build", "__pycache__",
+        ".gradle", ".idea", ".vscode", "target", "bin", "obj", ".next",
+        ".nuxt", "coverage", ".terraform", ".cache", ".mvn", ".settings",
+        "venv", ".venv", "env", ".tox", ".mypy_cache", ".pytest_cache"
+    );
+
     /**
-     * Build a file tree listing (respecting .gitignore), capped at 500 entries.
+     * Build a file tree listing (respecting .gitignore).
+     * Skips binary files, sorts root-level first for better LLM visibility.
      */
     private List<String> buildFileTree(Path root, GitIgnoreFilter gitIgnore) {
         List<String> tree = new ArrayList<>();
         try {
-            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), 10, new SimpleFileVisitor<>() {
+            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), 12, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (tree.size() >= 500) return FileVisitResult.TERMINATE;
-                    if (attrs.size() > 500_000 || attrs.size() < 10) return FileVisitResult.CONTINUE;
+                    if (tree.size() >= 1000) return FileVisitResult.TERMINATE;
+                    if (attrs.size() > 1_000_000 || attrs.size() < 5) return FileVisitResult.CONTINUE;
                     if (gitIgnore.isIgnored(file)) return FileVisitResult.CONTINUE;
+
+                    String name = file.getFileName().toString().toLowerCase();
+                    // Skip binary/media/lock files
+                    if (isBinaryFile(name)) return FileVisitResult.CONTINUE;
 
                     tree.add(root.relativize(file).toString().replace('\\', '/'));
                     return FileVisitResult.CONTINUE;
@@ -95,7 +112,10 @@ public class AgentFactDiscovery {
 
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (dir.equals(root)) return FileVisitResult.CONTINUE;
                     if (!gitIgnore.shouldEnterDirectory(dir)) return FileVisitResult.SKIP_SUBTREE;
+                    String dirName = dir.getFileName().toString().toLowerCase();
+                    if (SKIP_DIRS.contains(dirName)) return FileVisitResult.SKIP_SUBTREE;
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -105,7 +125,29 @@ public class AgentFactDiscovery {
                 }
             });
         } catch (IOException e) { /* skip */ }
+
+        // Sort: root-level files first (configs/manifests), then by path depth
+        tree.sort((a, b) -> {
+            int depthA = (int) a.chars().filter(c -> c == '/').count();
+            int depthB = (int) b.chars().filter(c -> c == '/').count();
+            return Integer.compare(depthA, depthB);
+        });
+
         return tree;
+    }
+
+    private boolean isBinaryFile(String name) {
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+            name.endsWith(".gif") || name.endsWith(".ico") || name.endsWith(".svg") ||
+            name.endsWith(".woff") || name.endsWith(".woff2") || name.endsWith(".ttf") ||
+            name.endsWith(".eot") || name.endsWith(".mp4") || name.endsWith(".mp3") ||
+            name.endsWith(".zip") || name.endsWith(".tar") || name.endsWith(".gz") ||
+            name.endsWith(".jar") || name.endsWith(".class") || name.endsWith(".pyc") ||
+            name.endsWith(".so") || name.endsWith(".dll") || name.endsWith(".exe") ||
+            name.endsWith(".lock") || name.endsWith(".sum") || name.endsWith(".min.js") ||
+            name.endsWith(".min.css") || name.endsWith(".map") || name.endsWith(".wasm") ||
+            name.endsWith(".o") || name.endsWith(".a") || name.endsWith(".lib") ||
+            name.endsWith(".db") || name.endsWith(".sqlite");
     }
 
     /**
@@ -113,8 +155,8 @@ public class AgentFactDiscovery {
      */
     private List<String> askLlmToPickFiles(List<String> fileTree) {
         String treeText = String.join("\n", fileTree);
-        if (treeText.length() > 6000) {
-            treeText = treeText.substring(0, 6000) + "\n... (truncated)";
+        if (treeText.length() > 12000) {
+            treeText = treeText.substring(0, 12000) + "\n... (" + fileTree.size() + " total files, truncated)";
         }
 
         String prompt = "Here is a project's file listing:\n\n" + treeText + "\n\n" +
@@ -122,11 +164,12 @@ public class AgentFactDiscovery {
             "architecture, dependencies, technology relationships, configuration constraints, and any mathematical/scientific formulas.\n\n" +
             "Prioritize:\n" +
             "- README and documentation\n" +
-            "- Dependency manifests (pom.xml, package.json, go.mod, etc.)\n" +
-            "- Main entry points and core business logic\n" +
-            "- Configuration files with limits/thresholds\n" +
-            "- Infrastructure definitions (Docker, K8s, Terraform)\n\n" +
-            "Respond with ONLY the file paths, one per line. No numbering, no explanation.";
+            "- Dependency manifests (pom.xml, package.json, go.mod, Cargo.toml, etc.)\n" +
+            "- Main entry points and core business logic (main.go, app.py, index.ts, etc.)\n" +
+            "- Configuration files with limits/thresholds (application.yml, config.*, .env.example)\n" +
+            "- Infrastructure definitions (Docker, K8s, Terraform, docker-compose)\n" +
+            "- Core service/controller/handler files\n\n" +
+            "Respond with ONLY the exact file paths from the listing above, one per line. No numbering, no explanation, no markdown.";
 
         String response = llmCallback.apply(prompt);
         if (response == null || response.isBlank()) return Collections.emptyList();
@@ -135,20 +178,22 @@ public class AgentFactDiscovery {
         Set<String> fileTreeSet = new HashSet<>(fileTree);
 
         for (String line : response.split("\n")) {
-            String path = line.trim().replaceAll("^[\\d.\\-*]+\\s*", ""); // Strip numbering/bullets
-            path = path.replaceAll("^`|`$", ""); // Strip backticks
-            if (path.isEmpty()) continue;
+            String path = line.trim();
+            // Strip common LLM formatting
+            path = path.replaceAll("^[\\d.\\-*•]+[\\s.)]+", ""); // numbering/bullets
+            path = path.replaceAll("^`|`$", ""); // backticks
+            path = path.replaceAll("^- ", ""); // dash bullets
+            path = path.trim();
+            if (path.isEmpty() || path.startsWith("#") || path.startsWith("Note")) continue;
 
-            // Match against actual file tree (exact or fuzzy)
+            // Exact match
             if (fileTreeSet.contains(path)) {
                 selected.add(path);
             } else {
-                // Try fuzzy match (LLM might format slightly differently)
-                for (String actual : fileTree) {
-                    if (actual.endsWith(path) || actual.replace('/', '\\').endsWith(path)) {
-                        selected.add(actual);
-                        break;
-                    }
+                // Fuzzy match: LLM might format slightly differently
+                String matched = fuzzyMatch(path, fileTree);
+                if (matched != null) {
+                    selected.add(matched);
                 }
             }
 
@@ -156,6 +201,37 @@ public class AgentFactDiscovery {
         }
 
         return selected;
+    }
+
+    /**
+     * Fuzzy match a path against the file tree.
+     * Handles: trailing/leading slashes, case differences, partial paths.
+     */
+    private String fuzzyMatch(String candidate, List<String> fileTree) {
+        // Normalize
+        String normalized = candidate.replace('\\', '/');
+        if (normalized.startsWith("./")) normalized = normalized.substring(2);
+        if (normalized.startsWith("/")) normalized = normalized.substring(1);
+
+        // Try exact after normalization
+        for (String actual : fileTree) {
+            if (actual.equals(normalized)) return actual;
+        }
+
+        // Try suffix match (LLM might omit a prefix directory)
+        for (String actual : fileTree) {
+            if (actual.endsWith("/" + normalized) || actual.endsWith(normalized)) {
+                return actual;
+            }
+        }
+
+        // Try case-insensitive
+        String lowerCandidate = normalized.toLowerCase();
+        for (String actual : fileTree) {
+            if (actual.toLowerCase().equals(lowerCandidate)) return actual;
+        }
+
+        return null;
     }
 
     private void analyzeFile(String relativePath, String content) {
