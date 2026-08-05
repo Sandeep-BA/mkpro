@@ -26,6 +26,7 @@ public class IntentClassifier {
         ANDROID,
         IOS,
         GOALS,
+        PRODUCT,
         GENERAL  // Fallback — routes to Coordinator
     }
 
@@ -92,6 +93,14 @@ public class IntentClassifier {
             "goal", "todo", "task.*track", "progress", "sprint", "backlog",
             "priorit", "milestone", "what.*remain", "what.*pending",
             "execute.*goal", "run.*goal", "do.*goal", "complete.*goal"
+        ));
+
+        PATTERNS.put(TaskCategory.PRODUCT, compilePatterns(
+            "prd", "product.*requirement", "user.*stor", "acceptance.*criteria",
+            "roadmap", "epic", "jira", "stakeholder", "mvp", "success.*metric",
+            "kpi", "okr", "feature.*spec", "product.*spec", "requirement.*doc",
+            "prioritiz", "rice.*score", "moscow", "scope.*doc", "out.*of.*scope",
+            "product.*decision", "user.*need", "problem.*statement"
         ));
 
         PATTERNS.put(TaskCategory.SYSADMIN, compilePatterns(

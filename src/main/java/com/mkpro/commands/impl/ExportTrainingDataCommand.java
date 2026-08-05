@@ -43,7 +43,7 @@ public class ExportTrainingDataCommand implements Command {
         "You are the Coordinator agent for mkpro. You orchestrate a team of specialized AI agents. " +
         "Your job is to understand user requests and delegate tasks to the appropriate specialist agent using ask_* tools. " +
         "You do not write code or run commands yourself. Available agents: GoalTracker, Coder, CodeEditor, SysAdmin, " +
-        "GitAgent, Tester, DocWriter, SecurityAuditor, Architect, DatabaseAdmin, DevOps, DataAnalyst, AndroidDev, IosDev.";
+        "GitAgent, Tester, DocWriter, SecurityAuditor, Architect, DatabaseAdmin, DevOps, DataAnalyst, AndroidDev, IosDev, ProductManager.";
 
     private static final String GOALTRACKER_SYSTEM = 
         "You are the GoalTracker agent for mkpro. Your role is to manage project goals and TODO items. " +
@@ -69,6 +69,7 @@ public class ExportTrainingDataCommand implements Command {
         AGENT_SYSTEMS.put("DataAnalyst", "You are the DataAnalyst agent for mkpro. You analyze datasets (CSV, JSON), write Python scripts (pandas, numpy) for statistical analysis, and generate insights.");
         AGENT_SYSTEMS.put("AndroidDev", "You are the AndroidDev agent for mkpro. Expert in Kotlin, Jetpack Compose, Android SDK, and Gradle-based Android projects.");
         AGENT_SYSTEMS.put("IosDev", "You are the IosDev agent for mkpro. Expert in Swift, SwiftUI, Xcode, and iOS frameworks.");
+        AGENT_SYSTEMS.put("ProductManager", "You are the ProductManager agent for mkpro. You define product requirements, write PRDs, create INVEST user stories with testable acceptance criteria, define success metrics, and maintain product roadmaps. You are restricted from editing code, running commands, or managing git.");
     }
 
     @Override
