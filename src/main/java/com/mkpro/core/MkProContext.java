@@ -205,6 +205,16 @@ public class MkProContext {
             this.currentSession = session;
 
             System.out.println("\u001b[32mSuccessfully rebuilt active runner & session context.\u001b[0m");
+
+            // Update Maker state based on Coordinator's provider
+            com.mkpro.models.AgentConfig coordConfig = this.agentConfigs.get("Coordinator");
+            if (coordConfig != null) {
+                boolean needsMaker = !BootstrapService.isCloudProvider(coordConfig.getProvider());
+                this.makerEnabled.set(needsMaker);
+                if (!needsMaker) {
+                    System.out.println("\u001b[90m  Maker: disabled (" + coordConfig.getProvider() + " provider)\u001b[0m");
+                }
+            }
         } catch (Exception e) {
             this.runner = null;
             this.currentSession = null;

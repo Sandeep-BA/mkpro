@@ -529,6 +529,13 @@ public class BootstrapService {
             com.mkpro.routing.MakerLoop makerLoop = new com.mkpro.routing.MakerLoop(markovRouter);
             context.setMakerLoop(makerLoop);
 
+            // Disable Maker for cloud providers (powerful enough without micro-supervision)
+            com.mkpro.models.AgentConfig coordConfig = context.getAgentConfigs().get("Coordinator");
+            if (coordConfig != null && isCloudProvider(coordConfig.getProvider())) {
+                context.getMakerEnabled().set(false);
+                System.out.println(ANSI_DIM + "  Maker: disabled (" + coordConfig.getProvider() + " provider)" + ANSI_RESET);
+            }
+
             // Initialize FactEngine (verified facts + relationship graph)
             com.mkpro.facts.FactEngine factEngine = new com.mkpro.facts.FactEngine();
             factEngine.setCentralMemory(context.getCentralMemory());
@@ -669,5 +676,16 @@ public class BootstrapService {
             ollamaServers.add(0, "local|http://localhost:11434");
             centralMemory.saveOllamaServers(ollamaServers);
         }
+    }
+
+    /**
+     * Cloud providers (Gemini, Azure, Bedrock) are powerful enough to not need
+     * the Maker's micro-supervision (goal tracking, retry, stall detection).
+     * This saves tokens on metered APIs and avoids unnecessary overhead.
+     */
+    static boolean isCloudProvider(com.mkpro.models.Provider provider) {
+        return provider == com.mkpro.models.Provider.GEMINI
+            || provider == com.mkpro.models.Provider.AZURE
+            || provider == com.mkpro.models.Provider.BEDROCK;
     }
 }

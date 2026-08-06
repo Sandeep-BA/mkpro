@@ -73,47 +73,13 @@ public class JlamaProvider extends BaseLlm {
 
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest request, boolean streaming) {
-        if (streaming) {
-            return generateStreaming(request);
-        } else {
-            return generateBlocking(request);
-        }
+        // Always use streaming internally — ADK subscribes reactively and expects partial emissions
+        return generateStreaming(request);
     }
 
     @Override
     public BaseLlmConnection connect(LlmRequest request) {
         return new GenericLlmConnection(this, request);
-    }
-
-    /**
-     * Generate a complete response (non-streaming).
-     */
-    private Flowable<LlmResponse> generateBlocking(LlmRequest request) {
-        return Flowable.fromCallable(() -> {
-            PromptContext ctx = buildPromptContext(request);
-            int maxTokens = extractMaxTokens(request);
-            float temperature = extractTemperature(request);
-
-            Generator.Response response = loadedModel.generate(
-                UUID.randomUUID(), ctx, temperature, maxTokens, (s, f) -> {});
-
-            int inputTokens = response.promptTokens;
-            int outputTokens = response.generatedTokens;
-            totalInputTokens.addAndGet(inputTokens);
-            totalOutputTokens.addAndGet(outputTokens);
-
-            Content content = Content.fromParts(Part.fromText(response.responseText));
-            return LlmResponse.builder()
-                .content(content)
-                .turnComplete(true)
-                .partial(false)
-                .usageMetadata(GenerateContentResponseUsageMetadata.builder()
-                    .promptTokenCount(inputTokens)
-                    .candidatesTokenCount(outputTokens)
-                    .totalTokenCount(inputTokens + outputTokens)
-                    .build())
-                .build();
-        });
     }
 
     /**
