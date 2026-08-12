@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "JDK_JAVA_OPTIONS=--add-modules jdk.incubator.vector --enable-preview"
 
 :: Get the directory where this script resides
 set "SCRIPT_DIR=%~dp0"
@@ -15,6 +16,6 @@ if not exist "%JAR_PATH%" (
 )
 
 :: Run the application with registry enabled
-java -Dmkpro.db.name=%~n0 --add-modules jdk.incubator.vector -jar "%JAR_PATH%" --enable-registry %*
+java -Dmkpro.db.name=%~n0 -jar "%JAR_PATH%" --enable-registry %*
 
 endlocal

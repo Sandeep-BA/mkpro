@@ -134,13 +134,22 @@ public class MkPro {
             // 4. Wire web input handler (web messages processed directly via runner in background thread)
             if (context.getWebChatServer() != null) {
                 final com.mkpro.core.MkProContext ctx = context;
-                context.getWebChatServer().setInputHandler(text -> {
-                    // Process web input in a background thread
-                    new Thread(() -> processWebInput(ctx, text), "web-input").start();
+                context.getWebChatServer().setInputHandler(new com.mkpro.web.WebChatServer.WebInputHandler() {
+                    @Override
+                    public void onWebInput(String text) {
+                        new Thread(() -> processWebInput(ctx, text), "web-input").start();
+                    }
+                    @Override
+                    public void onWebInputWithImages(String text, java.util.List<com.mkpro.web.WebChatServer.ImageAttachment> images) {
+                        new Thread(() -> processWebInputWithImages(ctx, text, images), "web-input").start();
+                    }
                 });
             }
 
-            // 5. Start the UI Loop
+            // 5. Restore user preferences from previous session
+            restoreSessionPreferences(context, args, registry);
+
+            // 6. Start the UI Loop
             TerminalUI ui = new TerminalUI(context, registry);
             ui.start();
         } catch (Exception e) {
@@ -264,6 +273,39 @@ public class MkPro {
      * Parse --web [port] from command line args.
      * Returns port number if --web is present (default 8080), or -1 if not.
      */
+    /**
+     * Restore user preferences from previous session (web, scheduler).
+     * Only activates if not already started via command-line flags.
+     */
+    private static void restoreSessionPreferences(com.mkpro.core.MkProContext context, String[] args, CommandRegistry registry) {
+        try {
+            // Restore /web if user had it on and not already started via --web flag
+            if (context.getWebChatServer() == null) {
+                String webPref = context.getCentralMemory().getMemory("pref:web");
+                if (webPref != null && !webPref.isEmpty() && !"off".equals(webPref)) {
+                    try {
+                        int port = Integer.parseInt(webPref);
+                        System.out.println(ANSI_DIM + "  Restoring /web on port " + port + " (from previous session)" + ANSI_RESET);
+                        registry.executeCommand("/web on " + port, context);
+                    } catch (NumberFormatException e) {
+                        // Invalid port stored, skip
+                    }
+                }
+            }
+
+            // Restore /scheduler if user had it on and not already started via --scheduler flag
+            if (context.getKnowledgeScheduler() == null && !context.isSchedulerEnabled()) {
+                String schedPref = context.getCentralMemory().getMemory("pref:scheduler");
+                if ("on".equals(schedPref)) {
+                    System.out.println(ANSI_DIM + "  Restoring /scheduler on (from previous session)" + ANSI_RESET);
+                    registry.executeCommand("/scheduler on", context);
+                }
+            }
+        } catch (Exception e) {
+            // Silent — preference restore should never block startup
+        }
+    }
+
     private static int getWebPort(String[] args) {
         for (int i = 0; i < args.length; i++) {
             if ("--web".equals(args[i])) {
@@ -292,6 +334,80 @@ public class MkPro {
      */
     public static void processWebInputPublic(com.mkpro.core.MkProContext context, String text) {
         processWebInput(context, text);
+    }
+
+    /**
+     * Process web input that includes image attachments (multimodal).
+     * Builds a Content with both text and inline image parts for vision-capable models.
+     */
+    private static void processWebInputWithImages(com.mkpro.core.MkProContext context, String text,
+                                                   java.util.List<com.mkpro.web.WebChatServer.ImageAttachment> images) {
+        try {
+            if (context.getRunner() == null || context.getCurrentSession() == null) return;
+
+            System.out.println(ANSI_CYAN + "[Web] " + ANSI_RESET + text + " [+" + images.size() + " image(s)]");
+
+            // Build multimodal parts: text + images
+            java.util.List<com.google.genai.types.Part> parts = new java.util.ArrayList<>();
+            parts.add(com.google.genai.types.Part.fromText(text));
+
+            for (com.mkpro.web.WebChatServer.ImageAttachment img : images) {
+                com.google.genai.types.Part imagePart = com.google.genai.types.Part.builder()
+                    .inlineData(com.google.genai.types.Blob.builder()
+                        .mimeType(img.mimeType())
+                        .data(img.data())
+                        .build())
+                    .build();
+                parts.add(imagePart);
+            }
+
+            com.google.genai.types.Content message = com.google.genai.types.Content.builder()
+                .role("user")
+                .parts(parts)
+                .build();
+
+            // Get agent info for display
+            com.mkpro.models.AgentConfig coordConfig = context.getAgentConfigs().get("Coordinator");
+            String model = coordConfig != null ? coordConfig.getModelName() : "llama3";
+            String agent = "Coordinator";
+
+            StringBuilder responseBuilder = new StringBuilder();
+            java.util.concurrent.atomic.AtomicBoolean firstChunk = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            context.getRunner().runAsync(context.getCurrentSession().sessionKey(), message)
+                .blockingSubscribe(event -> {
+                    event.content().ifPresent(content -> {
+                        content.parts().ifPresent(ps -> {
+                            for (com.google.genai.types.Part part : ps) {
+                                part.text().ifPresent(t -> {
+                                    if (firstChunk.compareAndSet(false, true)) {
+                                        String delegated = com.mkpro.agents.AgentManager.lastDelegatedAgent;
+                                        if (context.getEventBus() != null) {
+                                            context.getEventBus().emit(com.mkpro.events.MkProEvent.streamStart(
+                                                delegated != null ? delegated : agent, model));
+                                        }
+                                    }
+                                    responseBuilder.append(t);
+                                    if (context.getEventBus() != null) {
+                                        context.getEventBus().emit(com.mkpro.events.MkProEvent.streamChunk(t));
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }, error -> {
+                    if (context.getEventBus() != null) {
+                        context.getEventBus().emit(com.mkpro.events.MkProEvent.streamChunk("\n\n[Error: " + error.getMessage() + "]"));
+                        context.getEventBus().emit(com.mkpro.events.MkProEvent.streamEnd());
+                    }
+                }, () -> {
+                    if (context.getEventBus() != null) {
+                        context.getEventBus().emit(com.mkpro.events.MkProEvent.streamEnd());
+                    }
+                });
+        } catch (Exception e) {
+            System.err.println("[Web] Error processing image input: " + e.getMessage());
+        }
     }
 
     /**

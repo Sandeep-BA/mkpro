@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "JDK_JAVA_OPTIONS=--add-modules jdk.incubator.vector --enable-preview"
 
 :: Get the directory where this script resides
 set "SCRIPT_DIR=%~dp0"
@@ -16,6 +17,6 @@ if not exist "%JAR_PATH%" (
 
 :: Run with web UI enabled (default port 8080, WS on 8081)
 echo Starting mkpro with Web UI at http://localhost:8080
-java -Dmkpro.db.name=%~n0 --add-modules jdk.incubator.vector -jar "%JAR_PATH%" --web %*
+java -Dmkpro.db.name=%~n0 -jar "%JAR_PATH%" --web %*
 
 endlocal

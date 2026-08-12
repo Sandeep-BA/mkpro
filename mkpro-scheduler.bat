@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "JDK_JAVA_OPTIONS=--add-modules jdk.incubator.vector --enable-preview"
 
 :: Get the directory where this script resides
 set "SCRIPT_DIR=%~dp0"
@@ -19,6 +20,6 @@ echo Starting mkpro with Web UI + Knowledge Scheduler
 echo   Web UI:    http://localhost:8080
 echo   Knowledge: http://localhost:8080/knowledge
 echo   DB Browser: http://localhost:8080/db
-java -Dmkpro.db.name=%~n0 --add-modules jdk.incubator.vector -jar "%JAR_PATH%" --web --scheduler %*
+java -Dmkpro.db.name=%~n0 -jar "%JAR_PATH%" --web --scheduler %*
 
 endlocal

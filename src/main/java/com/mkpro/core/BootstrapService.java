@@ -608,7 +608,12 @@ public class BootstrapService {
 
             LineReader reader = LineReaderBuilder.builder()
                 .terminal(terminal)
+                .variable(LineReader.HISTORY_FILE, com.mkpro.utils.PathUtils.getProjectPath().resolve(".mkpro").resolve("history.txt"))
                 .build();
+            // Load history from previous sessions
+            try {
+                reader.getHistory().load();
+            } catch (Exception ignored) {}
             context.setLineReader(reader);
         } catch (IOException e) {
             System.err.println("Could not initialize JLine terminal.");

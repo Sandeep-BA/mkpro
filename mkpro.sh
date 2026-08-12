@@ -10,6 +10,8 @@ done
 SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" &> /dev/null && pwd )"
 
 # Define the path to the shaded JAR
+
+export JDK_JAVA_OPTIONS="--add-modules jdk.incubator.vector --enable-preview"
 JAR_PATH="$SCRIPT_DIR/target/mkpro-4.1.2.jar"
 
 # Check if the JAR exists
@@ -20,4 +22,4 @@ if [ ! -f "$JAR_PATH" ]; then
 fi
 
 # Run the application
-java --add-modules jdk.incubator.vector -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" "$@"
+java -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" "$@"

@@ -648,6 +648,7 @@
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <span>📁 Project Files</span>
+                <button class="sidebar-toggle" onclick="refreshFileTree()" title="Refresh files" style="font-size:14px;opacity:0.7">🔄</button>
                 <button class="sidebar-toggle" onclick="toggleSidebar()" title="Hide panel">✕</button>
             </div>
             <div class="file-tree" id="fileTree"></div>
@@ -1020,6 +1021,8 @@
                 case 'stream_end':
                     hideLoader();
                     endStreaming();
+                    // Auto-refresh file tree after agent completes (may have edited files)
+                    refreshFileTree();
                     break;
                 case 'maker':
                     addMakerMessage(msg.message);
@@ -1210,6 +1213,34 @@
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
+            }
+        });
+
+        // ========== Image Paste Handler ==========
+        input.addEventListener('paste', (e) => {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (!file) continue;
+
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const name = 'pasted-image-' + Date.now() + '.' + (file.type.split('/')[1] || 'png');
+                        pendingAttachments.push({
+                            name: name,
+                            content: ev.target.result, // base64 data URL
+                            type: file.type,
+                            isImage: true
+                        });
+                        renderAttachments();
+                    };
+                    reader.readAsDataURL(file);
+                    break; // Only handle first image
+                }
             }
         });
 
@@ -1659,6 +1690,14 @@
         function getFileIcon(name) {
             const ext = name.split('.').pop().toLowerCase();
             return FILE_ICONS[ext] || '📄';
+        }
+
+        function refreshFileTree() {
+            const fileTree = document.getElementById('fileTree');
+            if (fileTree) {
+                fileTree.innerHTML = '';
+                loadDirectory('', fileTree, 0);
+            }
         }
 
         async function loadDirectory(path, container, depth) {

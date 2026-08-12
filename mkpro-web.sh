@@ -10,6 +10,8 @@ done
 SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" &> /dev/null && pwd )"
 
 # Define the path to the shaded JAR
+
+export JDK_JAVA_OPTIONS="--add-modules jdk.incubator.vector --enable-preview"
 JAR_PATH="$SCRIPT_DIR/target/mkpro-4.1.2.jar"
 
 # Check if the JAR exists
@@ -21,4 +23,4 @@ fi
 
 # Run with web UI enabled (default port 8080, WS on 8081)
 echo "Starting mkpro with Web UI at http://localhost:8080"
-java --add-modules jdk.incubator.vector -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --web "$@"
+java -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --web "$@"

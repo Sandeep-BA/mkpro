@@ -215,6 +215,9 @@ public class SchedulerCommand implements Command {
                 System.out.println("  Use /know add <name> <url> to add topics.");
             }
 
+            // Remember preference for next session
+            context.getCentralMemory().saveMemory("pref:scheduler", "on");
+
         } catch (Exception e) {
             System.out.println("\u001b[31m[Scheduler] Failed to start: " + e.getMessage() + "\u001b[0m");
         }
@@ -230,6 +233,9 @@ public class SchedulerCommand implements Command {
         scheduler.stop();
         context.setKnowledgeScheduler(null);
         System.out.println("\u001b[32m[Scheduler] Stopped. Accumulated data preserved (/know search still works).\u001b[0m");
+
+        // Remember preference for next session
+        context.getCentralMemory().saveMemory("pref:scheduler", "off");
     }
 
     /**

@@ -10,6 +10,8 @@ done
 SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" &> /dev/null && pwd )"
 
 # Define the path to the shaded JAR
+
+export JDK_JAVA_OPTIONS="--add-modules jdk.incubator.vector --enable-preview"
 JAR_PATH="$SCRIPT_DIR/target/mkpro-4.1.2.jar"
 
 # Check if the JAR exists
@@ -25,4 +27,4 @@ echo "  Runner:    MAP_DB (persistent)"
 echo "  Web UI:    http://localhost:8080"
 echo "  Knowledge: http://localhost:8080/knowledge"
 echo "  DB Browser: http://localhost:8080/db"
-java --add-modules jdk.incubator.vector -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --runner MAP_DB --web --scheduler "$@"
+java -Dmkpro.db.name=$(basename "$0" .sh) -jar "$JAR_PATH" --runner MAP_DB --web --scheduler "$@"

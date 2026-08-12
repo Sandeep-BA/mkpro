@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set "JDK_JAVA_OPTIONS=--add-modules jdk.incubator.vector --enable-preview"
 
 :: Jlama Model Downloader
 :: Downloads a HuggingFace model for use with mkpro's Jlama provider
@@ -41,6 +42,6 @@ echo.
 
 if not exist "%MODELS_DIR%" mkdir "%MODELS_DIR%"
 
-java --add-modules jdk.incubator.vector -cp "%JAR_PATH%" com.mkpro.models.JlamaModelDownloader "%~1" "%MODELS_DIR%"
+java -cp "%JAR_PATH%" com.mkpro.models.JlamaModelDownloader "%~1" "%MODELS_DIR%"
 
 endlocal

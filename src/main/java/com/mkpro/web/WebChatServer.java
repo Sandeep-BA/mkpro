@@ -270,6 +270,7 @@ public class WebChatServer {
                 broadcastExcluding(userMsg, sender);
 
                 // Process file attachments — prepend content to the message
+                java.util.List<ImageAttachment> imageAttachments = new java.util.ArrayList<>();
                 if (msg.has("attachments") && msg.get("attachments").isArray()) {
                     StringBuilder contextBuilder = new StringBuilder();
                     for (com.fasterxml.jackson.databind.JsonNode attachment : msg.get("attachments")) {
@@ -278,12 +279,16 @@ public class WebChatServer {
                         boolean isImage = attachment.has("isImage") && attachment.get("isImage").asBoolean();
 
                         if (isImage) {
-                            // For images, include as a data URL reference (vision tool can process)
-                            contextBuilder.append("[Attached image: ").append(name).append("]\n");
-                            // Store image data URL — truncate display but keep reference
-                            if (content.length() > 100) {
-                                contextBuilder.append("[Image data: ").append(content.substring(0, 50)).append("...]\n\n");
+                            // Extract base64 data from data URL (data:image/png;base64,...)
+                            String mimeType = attachment.has("type") ? attachment.get("type").asText() : "image/png";
+                            if (content.startsWith("data:")) {
+                                int commaIdx = content.indexOf(',');
+                                if (commaIdx > 0) {
+                                    byte[] imageBytes = java.util.Base64.getDecoder().decode(content.substring(commaIdx + 1));
+                                    imageAttachments.add(new ImageAttachment(name, mimeType, imageBytes));
+                                }
                             }
+                            contextBuilder.append("[Attached image: ").append(name).append("]\n");
                         } else {
                             // For text files, include content directly
                             contextBuilder.append("--- File: ").append(name).append(" ---\n");
@@ -307,7 +312,11 @@ public class WebChatServer {
                 if (!text.isEmpty() && inputHandler != null) {
                     // Store sender on context for logging
                     lastWebSender = sender;
-                    inputHandler.onWebInput(text);
+                    if (!imageAttachments.isEmpty()) {
+                        inputHandler.onWebInputWithImages(text, imageAttachments);
+                    } else {
+                        inputHandler.onWebInput(text);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -468,5 +477,10 @@ public class WebChatServer {
      */
     public interface WebInputHandler {
         void onWebInput(String text);
+        default void onWebInputWithImages(String text, java.util.List<ImageAttachment> images) {
+            onWebInput(text); // fallback to text-only
+        }
     }
+
+    public record ImageAttachment(String name, String mimeType, byte[] data) {}
 }

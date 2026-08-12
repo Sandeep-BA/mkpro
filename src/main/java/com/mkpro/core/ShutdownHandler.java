@@ -23,6 +23,13 @@ class ShutdownHandler {
     void execute() {
         System.out.println("\n" + ANSI_YELLOW + "Shutting down MkPro..." + ANSI_RESET);
 
+        // Save command history
+        if (context.getLineReader() != null) {
+            try {
+                context.getLineReader().getHistory().save();
+            } catch (Exception e) { /* Silent */ }
+        }
+
         // Auto-save Markov model with live learning from this session
         if (context.getMarkovRouter() != null) {
             try {
