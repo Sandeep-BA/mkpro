@@ -366,7 +366,11 @@ public class MkProTools {
 
                         boolean approved;
                         try {
-                            approved = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                            // In web mode, auto-approve after 5s (user sees diff post-hoc, can revert via git)
+                            // In CLI mode, TerminalSink has its own 7s countdown with reject option
+                            int timeoutSec = (com.mkpro.events.MkProEventBus.INSTANCE != null 
+                                && com.mkpro.events.MkProEventBus.INSTANCE.hasWebSink()) ? 5 : 30;
+                            approved = future.get(timeoutSec, java.util.concurrent.TimeUnit.SECONDS);
                         } catch (java.util.concurrent.TimeoutException e) {
                             approved = true;
                             approvalService.approve(proposalId);
@@ -459,10 +463,12 @@ public class MkProTools {
                         java.util.concurrent.CompletableFuture<Boolean> future = approvalService.submitProposal(proposal);
                         eventBus.emit(com.mkpro.events.MkProEvent.editProposal(proposal));
 
-                        // Wait for approval (30s timeout — auto-approve timer in TerminalSink fires at 7s)
+                        // Wait for approval (web: 5s auto-approve, CLI: TerminalSink has 7s countdown)
                         boolean approved;
                         try {
-                            approved = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                            int timeoutSec = (com.mkpro.events.MkProEventBus.INSTANCE != null 
+                                && com.mkpro.events.MkProEventBus.INSTANCE.hasWebSink()) ? 5 : 30;
+                            approved = future.get(timeoutSec, java.util.concurrent.TimeUnit.SECONDS);
                         } catch (java.util.concurrent.TimeoutException e) {
                             // Timeout = auto-approve (headless safety)
                             approved = true;

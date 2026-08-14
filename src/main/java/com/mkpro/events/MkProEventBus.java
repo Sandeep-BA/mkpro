@@ -54,4 +54,14 @@ public class MkProEventBus {
     public int listenerCount() {
         return listeners.size();
     }
+
+    /**
+     * Check if a WebSocketSink is registered (i.e., web mode is active).
+     */
+    public boolean hasWebSink() {
+        for (MkProEventListener listener : listeners) {
+            if (listener instanceof WebSocketSink) return true;
+        }
+        return false;
+    }
 }

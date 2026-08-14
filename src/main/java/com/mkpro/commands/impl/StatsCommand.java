@@ -11,8 +11,14 @@ public class StatsCommand implements Command {
     @Override
     public void execute(String[] args, MkProContext context) {
         List<AgentStat> stats = context.getCentralMemory().getAgentStats();
+
+        // Use System.out as fallback if terminal is unavailable
+        java.io.PrintWriter out = context.getTerminal() != null 
+            ? context.getTerminal().writer() 
+            : new java.io.PrintWriter(System.out, true);
+
         if (stats == null || stats.isEmpty()) {
-            context.getTerminal().writer().println(MkPro.ANSI_YELLOW + "No statistics recorded yet." + MkPro.ANSI_RESET);
+            out.println(MkPro.ANSI_YELLOW + "No statistics recorded yet." + MkPro.ANSI_RESET);
             return;
         }
 
@@ -23,28 +29,28 @@ public class StatsCommand implements Command {
                 .distinct()
                 .count();
 
-        context.getTerminal().writer().println(MkPro.ANSI_CYAN + "\n=== Agent & Token Statistics ===" + MkPro.ANSI_RESET);
-        context.getTerminal().writer().println("Total Sessions: " + MkPro.ANSI_BRIGHT_GREEN + totalSessions + MkPro.ANSI_RESET);
-        context.getTerminal().writer().println("Total Tokens:   " + MkPro.ANSI_BRIGHT_GREEN + String.format("%,d", totalTokens) + MkPro.ANSI_RESET);
+        out.println(MkPro.ANSI_CYAN + "\n=== Agent & Token Statistics ===" + MkPro.ANSI_RESET);
+        out.println("Total Sessions: " + MkPro.ANSI_BRIGHT_GREEN + totalSessions + MkPro.ANSI_RESET);
+        out.println("Total Tokens:   " + MkPro.ANSI_BRIGHT_GREEN + String.format("%,d", totalTokens) + MkPro.ANSI_RESET);
 
         // Group by Agent
-        context.getTerminal().writer().println(MkPro.ANSI_YELLOW + "\nTokens per Agent:" + MkPro.ANSI_RESET);
+        out.println(MkPro.ANSI_YELLOW + "\nTokens per Agent:" + MkPro.ANSI_RESET);
         stats.stream()
             .collect(Collectors.groupingBy(AgentStat::getAgentName, Collectors.summingLong(AgentStat::getTotalTokens)))
             .entrySet().stream()
             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-            .forEach(e -> context.getTerminal().writer().printf(" - %-15s: %s tokens\n", e.getKey(), String.format("%,d", e.getValue())));
+            .forEach(e -> out.printf(" - %-15s: %s tokens\n", e.getKey(), String.format("%,d", e.getValue())));
 
         // Group by Model
-        context.getTerminal().writer().println(MkPro.ANSI_YELLOW + "\nTokens per Model:" + MkPro.ANSI_RESET);
+        out.println(MkPro.ANSI_YELLOW + "\nTokens per Model:" + MkPro.ANSI_RESET);
         stats.stream()
             .collect(Collectors.groupingBy(AgentStat::getModel, Collectors.summingLong(AgentStat::getTotalTokens)))
             .entrySet().stream()
             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-            .forEach(e -> context.getTerminal().writer().printf(" - %-15s: %s tokens\n", e.getKey(), String.format("%,d", e.getValue())));
+            .forEach(e -> out.printf(" - %-15s: %s tokens\n", e.getKey(), String.format("%,d", e.getValue())));
 
-        context.getTerminal().writer().println(MkPro.ANSI_CYAN + "================================\n" + MkPro.ANSI_RESET);
-        context.getTerminal().flush();
+        out.println(MkPro.ANSI_CYAN + "================================\n" + MkPro.ANSI_RESET);
+        out.flush();
     }
 
     @Override
