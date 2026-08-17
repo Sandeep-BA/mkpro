@@ -1,51 +1,47 @@
 gemini:
+  # Flash Series (Speed, Agents & Coding)
+  - gemini-3.7-flash                        # Latest flagship — coding agents, agentic workflows (Aug 2026)
+  - gemini-3.6-flash                        # Production-grade stable Flash (GA, Jul 2026)
+  - gemini-3.5-flash-lite                   # Ultra-low cost, high-speed lightweight model
+
   # Pro Series (Advanced Reasoning & Multi-modal)
   - gemini-3.1-pro-preview                  # Frontier-class Pro preview with MCP support
-  - gemini-3-pro                            # General availability Pro generation
-  - gemini-2.5-pro                          # High-accuracy stable coding/reasoning fallback
-
-  # Flash & Lite Series (Speed, Agents & Cost-Efficiency)
-  - gemini-3.5-flash                        # Latest flagship agentic Flash model (May 2026)
-  - gemini-3.1-flash-lite                   # Ultra-low cost, high-speed lightweight model
-  - gemini-3-flash                          # Production-grade balanced speed/intelligence
-  - gemini-2.5-flash                        # Previous generation stable Flash fallback
 
 bedrock:
-  # Anthropic Claude (Claude 4.x & Upgraded 3.5)
-  - anthropic.claude-opus-4-8               # Most advanced reasoning and long-horizon agentic model
-  - anthropic.claude-sonnet-4-6             # Target model for balanced speed, context, and quality
-  - anthropic.claude-haiku-4-5              # Fastest, highly optimized Claude 4 model
-  - anthropic.claude-3-5-sonnet-20241022-v2:0 # Upgraded legacy generation fallback
+  # Anthropic Claude 5 Series
+  - anthropic.claude-opus-5                  # Most capable — long-running agents, deep reasoning
+  - anthropic.claude-sonnet-5                # Best for coding, agents, and professional work at scale
+  - anthropic.claude-fable-5                 # Creative writing, storytelling, nuanced tasks
 
-  # Meta Llama (Llama 4 MoE & Llama 3.x)
-  - meta.llama-4-maverick-17b-instruct      # Llama 4 Mixture-of-Experts (MoE) multimodal model
-  - meta.llama-4-scout-17b-instruct         # Lightweight Llama 4 MoE multimodal variant
-  - meta.llama-3-3-70b-instruct-v1:0        # High-capacity general purpose Llama 3 variant
-  - meta.llama-3-1-405b-instruct-v1:0       # Ultra-large Llama 3.1 flagship model
+  # Anthropic Claude 4.x (Current generation)
+  - anthropic.claude-opus-4-8                # Advanced reasoning, long-horizon agentic model
+  - anthropic.claude-opus-4-7                # Previous Opus generation, still highly capable
+  - anthropic.claude-sonnet-4-6             # Balanced speed, coding, and reasoning
+  - anthropic.claude-haiku-4-5              # Fastest Claude — optimized for speed and cost
 
-  # Amazon Native (Nova & Titan)
+  # Meta Llama 4 (MoE Multimodal)
+  - meta.llama-4-maverick-17b-instruct      # Llama 4 Mixture-of-Experts multimodal model
+  - meta.llama-4-scout-17b-instruct         # Lightweight Llama 4 MoE variant
+
+  # Amazon Nova
   - amazon.nova-pro-v1:0                    # Advanced multimodal, high-context utility model
   - amazon.nova-lite-v1:0                   # Speed-optimized multimodal model
   - amazon.nova-micro-v1:0                  # Ultra-fast, low-cost text-only model
   - amazon.nova-2-lite-v1:0                 # Nova 2 generation lightweight agent model
-  - amazon.titan-text-express-v1            # Stable legacy enterprise baseline
+
+  # OpenAI on Bedrock
+  - openai.daybreak-red                     # OpenAI Daybreak Red on Bedrock
+  - openai.daybreak-blue                    # OpenAI Daybreak Blue on Bedrock
 
 azure:
-  # GPT-5 Series (Frontier Logic & Adaptive Reasoning)
-  - gpt-5.5                                 # Latest flagship frontier multimodal model
-  - gpt-5-pro                               # High-capability GPT-5 Pro deployment
+  # GPT-5 Series (Frontier)
+  - gpt-5.6                                 # Latest flagship — available in Microsoft Foundry (Aug 2026)
+  - gpt-5.4                                 # 1M context, advanced tool search, agentic workflows
   - gpt-5.1                                 # Advanced adaptive reasoning model
   - gpt-5.1-mini                            # Fast, reasoning-capable lightweight variant
-  - gpt-5                                   # Base GPT-5 logic-heavy model
+  - gpt-5                                   # Base GPT-5 unified reasoning + code + dialogue
   - gpt-5-mini                              # Mid-tier GPT-5 standard efficiency model
-
-  # GPT-4.x Series (General-Purpose Flagships)
-  - gpt-4.1                                 # Flagship general-purpose creative/agentic model
-  - gpt-4.1-mini                            # Lightweight, high-throughput variant of GPT-4.1
-  - gpt-4o                                  # Classic multimodal baseline
-  - gpt-4o-mini                             # Classic highly cost-effective baseline
 
   # Reasoning / o-Series (Deep Think)
   - o4-mini                                 # Latest generation optimized reasoning mini model
   - o3-mini                                 # High-efficiency, low-latency reasoning model
-  - o1                                      # Legacy baseline reasoning model

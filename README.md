@@ -278,15 +278,10 @@ For detailed mTLS procedures, refer to:
 
 | Model | Best For |
 | :--- | :--- |
-| **gemini-3.1-pro-preview** | Next-gen Pro Preview — most capable Gemini model |
-| **gemini-3.1-flash-lite** | Ultra-efficient — smallest and fastest |
-| **gemini-3-flash-preview** | Gemini 3 Flash Preview |
-| **gemini-2.0-flash** | Next-gen Speed & Multimodal |
-| **gemini-2.0-flash-thinking-exp** | Advanced Reasoning (experimental) |
-| **gemini-2.0-pro-exp** | Ultimate Intelligence — complex reasoning and architecture |
-| **gemini-1.5-pro** | Large Context Reasoning (up to 2M tokens) |
-| **gemini-1.5-flash** | Efficiency — cost-effective for high-frequency tasks |
-| **gemini-1.5-flash-8b** | High-speed, small-scale |
+| **gemini-3.7-flash** | Latest flagship — coding agents, agentic workflows, design adherence (Aug 2026) |
+| **gemini-3.6-flash** | Production-grade stable Flash — balanced speed and intelligence |
+| **gemini-3.5-flash-lite** | Ultra-low cost, high-speed lightweight model |
+| **gemini-3.1-pro-preview** | Frontier-class Pro — complex reasoning and architecture |
 
 ## 🦙 Supported Ollama Models
 

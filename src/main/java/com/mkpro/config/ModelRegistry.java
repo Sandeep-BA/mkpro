@@ -93,22 +93,19 @@ public class ModelRegistry {
 
     private static void setDefaultModels() {
         GEMINI_MODELS = new ArrayList<>(Arrays.asList(
-            "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
-            "gemini-3-pro", "gemini-3-flash", "gemini-2.0-flash",
-            "gemini-2.0-flash-lite-preview-02-05", "gemini-2.0-pro-exp-02-05",
-            "gemini-2.0-flash-thinking-exp-01-21", "gemini-1.5-pro",
-            "gemini-1.5-pro-latest", "gemini-1.5-pro-002", "gemini-1.5-flash",
-            "gemini-1.5-flash-latest", "gemini-1.5-flash-002", "gemini-1.5-flash-8b",
-            "gemini-1.5-flash-8b-latest", "gemini-1.5-flash-8b-001"
+            "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite",
+            "gemini-3.1-pro-preview"
         ));
         BEDROCK_MODELS = new ArrayList<>(Arrays.asList(
-            "anthropic.claude-3-sonnet-20240229-v1:0", "anthropic.claude-3-haiku-20240307-v1:0",
-            "anthropic.claude-3-5-sonnet-20240620-v1:0", "meta.llama3-70b-instruct-v1:0",
-            "meta.llama3-8b-instruct-v1:0", "amazon.titan-text-express-v1"
+            "anthropic.claude-opus-5", "anthropic.claude-sonnet-5", "anthropic.claude-fable-5",
+            "anthropic.claude-opus-4-8", "anthropic.claude-opus-4-7",
+            "anthropic.claude-sonnet-4-6", "anthropic.claude-haiku-4-5",
+            "meta.llama-4-maverick-17b-instruct", "meta.llama-4-scout-17b-instruct",
+            "amazon.nova-pro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-micro-v1:0"
         ));
         AZURE_MODELS = new ArrayList<>(Arrays.asList(
-            "gpt-5-pro", "gpt-5.5", "gpt-5.1", "gpt-5", "gpt-5-mini",
-            "gpt-4o", "gpt-4-turbo", "gpt-35-turbo"
+            "gpt-5.6", "gpt-5.4", "gpt-5.1", "gpt-5.1-mini",
+            "gpt-5", "gpt-5-mini", "o4-mini", "o3-mini"
         ));
     }
 
