@@ -21,6 +21,8 @@ import java.net.http.HttpResponse;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.time.Duration;
+import java.nio.file.Path;
+import com.mkpro.utils.PathUtils;
 
 public class ActionLogger {
     private static DB db;
@@ -30,7 +32,7 @@ public class ActionLogger {
     
     private static final List<String> memoryBuffer = Collections.synchronizedList(new ArrayList<>());
     private static final int MAX_BUFFER_SIZE = 500;
-    private static final String ACTION_LOG_FILE = "action_log.txt";
+    private static final Path ACTION_LOG_PATH = PathUtils.getMkproDataDir().resolve("logs").resolve("action.log");
 
     private static String instanceName = "unknown";
     private static final ExecutorService shippingExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -104,9 +106,14 @@ public class ActionLogger {
     public static synchronized void logAction(String action) {
         String entry = String.format("[%s] ACTION: %s", LocalDateTime.now(), action);
         
-        try (FileWriter fw = new FileWriter(ACTION_LOG_FILE, true);
-             PrintWriter pw = new PrintWriter(fw)) {
-            pw.println(entry);
+        try {
+            if (ACTION_LOG_PATH.getParent() != null) {
+                java.nio.file.Files.createDirectories(ACTION_LOG_PATH.getParent());
+            }
+            try (FileWriter fw = new FileWriter(ACTION_LOG_PATH.toFile(), true);
+                 PrintWriter pw = new PrintWriter(fw)) {
+                pw.println(entry);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }

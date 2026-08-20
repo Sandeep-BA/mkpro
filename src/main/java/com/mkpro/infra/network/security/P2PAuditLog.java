@@ -1,12 +1,12 @@
 package com.mkpro.infra.network.security;
 
 import static com.mkpro.ui.AnsiColors.*;
+import com.mkpro.utils.PathUtils;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -16,17 +16,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * P2PAuditLog records all P2P network events for security monitoring.
- * Logs to ~/.mkpro/p2p_audit.log with timestamp, source, event type, and result.
+ * Logs to PathUtils.getLogDir()/p2p_audit.log with timestamp, source, event type, and result.
  *
  * Also maintains a connection whitelist — only approved IPs/peers can connect.
- * Whitelist stored in ~/.mkpro/p2p_whitelist.txt (one IP or peer-ID per line).
+ * Whitelist stored in PathUtils.getConfigDir()/p2p_whitelist.txt (one IP or peer-ID per line).
  * Empty whitelist = accept all (open mode).
  */
 public class P2PAuditLog {
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final Path AUDIT_LOG_PATH = Paths.get(System.getProperty("user.home"), ".mkpro", "p2p_audit.log");
-    private static final Path WHITELIST_PATH = Paths.get(System.getProperty("user.home"), ".mkpro", "p2p_whitelist.txt");
+    private static final Path AUDIT_LOG_PATH = PathUtils.getLogDir().resolve("p2p_audit.log");
+    private static final Path WHITELIST_PATH = PathUtils.getConfigDir().resolve("p2p_whitelist.txt");
 
     private static volatile P2PAuditLog instance;
     private final Set<String> whitelist = ConcurrentHashMap.newKeySet();
@@ -104,7 +104,7 @@ public class P2PAuditLog {
             System.out.println(ANSI_RED_BOLD + "    Source: " + source + ANSI_RESET);
             System.out.println(ANSI_YELLOW + "    Details: " + details + ANSI_RESET);
             System.out.println(ANSI_YELLOW + "    A peer attempted to connect with an invalid signature." + ANSI_RESET);
-            System.out.println(ANSI_YELLOW + "    If unexpected, check ~/.mkpro/p2p_audit.log" + ANSI_RESET);
+            System.out.println(ANSI_YELLOW + "    If unexpected, check " + AUDIT_LOG_PATH + ANSI_RESET);
             System.out.println();
         }
     }
@@ -114,7 +114,7 @@ public class P2PAuditLog {
         if (recentAlerts.add(alertKey)) {
             System.out.println();
             System.out.println(ANSI_YELLOW + "  ⚠ Connection rejected: " + source + " (not in whitelist)" + ANSI_RESET);
-            System.out.println(ANSI_YELLOW + "    Add to ~/.mkpro/p2p_whitelist.txt to allow." + ANSI_RESET);
+            System.out.println(ANSI_YELLOW + "    Add to " + WHITELIST_PATH + " to allow." + ANSI_RESET);
             System.out.println();
         }
     }

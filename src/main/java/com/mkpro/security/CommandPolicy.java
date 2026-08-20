@@ -2,6 +2,7 @@ package com.mkpro.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.mkpro.utils.PathUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,7 +16,7 @@ import java.util.regex.Pattern;
  * CommandPolicy enforces allowlist-based shell command execution.
  * Replaces the old blacklist approach with a positive security model.
  * 
- * Configuration loaded from ~/.mkpro/command_policy.yaml with bundled defaults.
+ * Configuration loaded from the config directory with fallback to legacy ~/.mkpro.
  */
 public class CommandPolicy {
 
@@ -187,15 +188,27 @@ public class CommandPolicy {
     // --- Policy Loading ---
 
     private static CommandPolicy loadPolicy() {
-        // Try loading from user config first
-        Path userPolicyFile = Paths.get(System.getProperty("user.home"), ".mkpro", "command_policy.yaml");
-        if (Files.exists(userPolicyFile)) {
+        // Try loading from config directory
+        Path policyFile = PathUtils.getConfigDir().resolve("command_policy.yaml");
+        
+        // Try falling back to legacy ~/.mkpro/command_policy.yaml
+        if (!Files.exists(policyFile)) {
+            Path legacyPolicyFile = Paths.get(System.getProperty("user.home"), ".mkpro", "command_policy.yaml");
+            if (Files.exists(legacyPolicyFile)) {
+                try {
+                    return loadFromYaml(Files.newInputStream(legacyPolicyFile));
+                } catch (Exception e) {
+                    System.err.println("[CommandPolicy] Error loading legacy policy: " + e.getMessage());
+                }
+            }
+        } else {
             try {
-                return loadFromYaml(Files.newInputStream(userPolicyFile));
+                return loadFromYaml(Files.newInputStream(policyFile));
             } catch (Exception e) {
-                System.err.println("[CommandPolicy] Error loading user policy, using defaults: " + e.getMessage());
+                System.err.println("[CommandPolicy] Error loading policy, using defaults: " + e.getMessage());
             }
         }
+        
         return createDefaultPolicy();
     }
 
@@ -220,58 +233,37 @@ public class CommandPolicy {
     private static CommandPolicy createDefaultPolicy() {
         // Default allowlist: common dev tools
         Set<String> allowed = new LinkedHashSet<>(Arrays.asList(
-            // Version control
             "git",
-            // Build tools
             "mvn", "maven", "gradle", "gradlew", "gradlew.bat",
-            // Node.js ecosystem
             "npm", "npx", "node", "yarn", "pnpm", "bun",
-            // Python
             "python", "python3", "pip", "pip3", "poetry", "uv",
-            // Java
             "java", "javac", "jar",
-            // Rust
             "cargo", "rustc",
-            // Go
             "go",
-            // Docker & containers
             "docker", "docker-compose", "podman",
-            // Kubernetes
             "kubectl", "helm",
-            // Cloud CLIs
             "aws", "gcloud", "az",
-            // Common utilities
             "ls", "dir", "cat", "type", "echo", "pwd", "cd",
             "find", "grep", "head", "tail", "wc", "sort", "uniq",
             "cp", "copy", "mv", "move", "mkdir", "touch",
             "curl", "wget",
-            // Testing
             "pytest", "jest", "mocha", "vitest",
-            // Linting & formatting
             "eslint", "prettier", "black", "ruff", "checkstyle",
-            // System info (safe)
             "whoami", "hostname", "date", "env", "set",
             "netstat", "ping", "tracert", "traceroute", "nslookup"
         ));
 
-        // Blocked patterns: dangerous flags/args even on allowed commands
+        // Blocked patterns: dangerous flags/args
         List<Pattern> blocked = new ArrayList<>(Arrays.asList(
-            // Recursive force delete
             Pattern.compile("rm\\s+(-[a-z]*f[a-z]*\\s+-[a-z]*r|--force.*--recursive|-rf|-fr)", Pattern.CASE_INSENSITIVE),
             Pattern.compile("del\\s+/[a-z]*f[a-z]*/[a-z]*s", Pattern.CASE_INSENSITIVE),
             Pattern.compile("rd\\s+/s\\s+/q\\s+[a-z]:\\\\(windows|program)", Pattern.CASE_INSENSITIVE),
-            // Format/wipe
             Pattern.compile("(mkfs|format\\s+[a-z]:)", Pattern.CASE_INSENSITIVE),
-            // Dangerous redirections to system devices
             Pattern.compile(">\\s*/dev/sd[a-z]", Pattern.CASE_INSENSITIVE),
-            // Fork bombs
             Pattern.compile(":\\(\\)\\{\\s*:\\|:\\s*&\\s*\\}\\s*;\\s*:", Pattern.CASE_INSENSITIVE),
-            // Reverse shells
             Pattern.compile("(nc|ncat|netcat)\\s+.*-e", Pattern.CASE_INSENSITIVE),
             Pattern.compile("bash\\s+-i\\s+>&", Pattern.CASE_INSENSITIVE),
-            // Force push to main/master without explicit confirmation path
             Pattern.compile("git\\s+push\\s+.*--force.*\\s+(main|master)", Pattern.CASE_INSENSITIVE),
-            // Destructive git on main
             Pattern.compile("git\\s+branch\\s+-[dD]\\s+(main|master)", Pattern.CASE_INSENSITIVE)
         ));
 

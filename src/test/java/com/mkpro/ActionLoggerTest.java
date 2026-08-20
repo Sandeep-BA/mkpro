@@ -5,34 +5,34 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.List;
+import com.mkpro.utils.PathUtils;
 
 public class ActionLoggerTest {
  private ActionLogger logger;
- private static final String ACTION_LOG_FILE = "action_log.txt";
+ private File logFile;
 
  @BeforeEach void setUp() {
  ActionLogger.close();
  logger = new ActionLogger(":memory:");
- File logFile = new File(ACTION_LOG_FILE);
+ // The code under test uses PathUtils.getMkproDataDir().resolve("logs").resolve("action.log")
+ logFile = PathUtils.getMkproDataDir().resolve("logs").resolve("action.log").toFile();
  if (logFile.exists()) logFile.delete();
  }
 
  @AfterEach void tearDown() {
  ActionLogger.close();
- File logFile = new File(ACTION_LOG_FILE);
  if (logFile.exists()) logFile.delete();
  }
 
  @Test @DisplayName("Test Case 1: File Logging") void testFileLogging() throws IOException {
  String action = "Test Action";
  logger.logAction(action);
- File logFile = new File(ACTION_LOG_FILE);
- assertTrue(logFile.exists());
+ assertTrue(logFile.exists(), "Log file should exist at: " + logFile.getAbsolutePath());
  List<String> lines = Files.readAllLines(logFile.toPath());
- assertFalse(lines.isEmpty());
+ assertFalse(lines.isEmpty(), "Log file should not be empty");
  boolean found = false;
  for (String line : lines) { if (line.contains("ACTION: " + action)) { found = true; break; } }
- assertTrue(found);
+ assertTrue(found, "Log entry not found in file: " + lines);
  }
 
  @Test @DisplayName("Test Case 2: In-Memory Buffer and Size Limit") void testInMemoryBufferLimit() {

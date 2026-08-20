@@ -8,12 +8,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.util.Base64;
+import com.mkpro.utils.PathUtils;
 
 /**
  * MessageAuthenticator provides HMAC-SHA256 signing and verification for P2P messages.
- * Uses a shared secret stored in ~/.mkpro/cluster_secret.key.
- * 
- * Peers must share this key file to communicate (manual copy or pairing mechanism).
+ * Uses a shared secret stored in the configuration directory.
  */
 public class MessageAuthenticator {
 
@@ -31,7 +30,7 @@ public class MessageAuthenticator {
 
     /**
      * Get or create the singleton instance.
-     * Loads the key from ~/.mkpro/cluster_secret.key, creating it if it doesn't exist.
+     * Loads the key from the config directory, migrating from ~/.mkpro if needed.
      */
     public static synchronized MessageAuthenticator getInstance() {
         if (instance == null) {
@@ -58,9 +57,6 @@ public class MessageAuthenticator {
 
     /**
      * Sign a message payload, returning the Base64-encoded HMAC.
-     *
-     * @param payload The message content to sign (typically the JSON body without the signature field)
-     * @return Base64-encoded HMAC-SHA256 signature, or null if authentication is disabled
      */
     public String sign(String payload) {
         if (secretKey == null) return null;
@@ -79,10 +75,6 @@ public class MessageAuthenticator {
 
     /**
      * Verify a message signature.
-     *
-     * @param payload The message content (same string that was signed)
-     * @param signature The Base64-encoded signature to verify
-     * @return true if the signature is valid, false otherwise
      */
     public boolean verify(String payload, String signature) {
         if (secretKey == null) return true; // Disabled mode — accept everything
@@ -91,49 +83,53 @@ public class MessageAuthenticator {
         String expected = sign(payload);
         if (expected == null) return false;
 
-        // Constant-time comparison to prevent timing attacks
         return constantTimeEquals(expected, signature);
     }
 
-    /**
-     * Check if authentication is enabled (key was loaded successfully).
-     */
     public boolean isEnabled() {
         return secretKey != null;
     }
 
     /**
-     * Get the path to the key file.
+     * Get the path to the key file in the standard config directory.
      */
     public static Path getKeyFilePath() {
-        return Paths.get(System.getProperty("user.home"), ".mkpro", KEY_FILE_NAME);
+        return PathUtils.getConfigDir().resolve(KEY_FILE_NAME);
     }
 
-    /**
-     * Regenerate the cluster secret. Existing peers will need the new key.
-     */
     public static synchronized void regenerateKey() throws IOException {
         byte[] newKey = generateKey();
         saveKey(newKey);
         instance = new MessageAuthenticator(newKey);
     }
 
-    // --- Private helpers ---
-
     private static byte[] loadOrCreateKey() throws IOException {
         Path keyPath = getKeyFilePath();
+        Files.createDirectories(keyPath.getParent());
 
+        // 1. Check if it already exists in the new location
         if (Files.exists(keyPath)) {
-            String encoded = Files.readString(keyPath).trim();
-            return Base64.getDecoder().decode(encoded);
+            return readKeyFromFile(keyPath);
         }
 
-        // Create new key
+        // 2. Check for legacy location: ~/.mkpro/cluster_secret.key
+        Path legacyPath = Paths.get(System.getProperty("user.home"), ".mkpro", KEY_FILE_NAME);
+        if (Files.exists(legacyPath)) {
+            byte[] legacyKey = readKeyFromFile(legacyPath);
+            saveKey(legacyKey); // Move to new location
+            System.out.println("[MessageAuthenticator] Migrated cluster secret from legacy location: " + legacyPath);
+            return legacyKey;
+        }
+
+        // 3. Create new key
         byte[] key = generateKey();
         saveKey(key);
         System.out.println("[MessageAuthenticator] Generated new cluster secret at: " + keyPath);
-        System.out.println("[MessageAuthenticator] Share this file with peers for authenticated communication.");
         return key;
+    }
+
+    private static byte[] readKeyFromFile(Path path) throws IOException {
+        return Base64.getDecoder().decode(Files.readString(path).trim());
     }
 
     private static byte[] generateKey() {
@@ -145,17 +141,10 @@ public class MessageAuthenticator {
 
     private static void saveKey(byte[] key) throws IOException {
         Path keyPath = getKeyFilePath();
-        Path parent = keyPath.getParent();
-        if (parent != null && !Files.exists(parent)) {
-            Files.createDirectories(parent);
-        }
         String encoded = Base64.getEncoder().encodeToString(key);
         Files.writeString(keyPath, encoded);
     }
 
-    /**
-     * Constant-time string comparison to prevent timing side-channels.
-     */
     private static boolean constantTimeEquals(String a, String b) {
         if (a.length() != b.length()) return false;
         int result = 0;

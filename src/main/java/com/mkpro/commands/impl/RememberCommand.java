@@ -5,9 +5,12 @@ import com.google.genai.types.Part;
 import com.mkpro.commands.Command;
 import com.mkpro.core.MkProContext;
 import com.mkpro.MkPro;
+import com.mkpro.utils.PathUtils;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * RememberCommand summarizes the current session and saves it to central memory.
@@ -47,10 +50,14 @@ public class RememberCommand implements Command {
         }
 
         // Save to file
-        try (FileWriter writer = new FileWriter("session_summary.txt")) {
-            writer.write(summary);
+        Path summaryPath = PathUtils.getMkproDataDir().resolve("session_summary.txt");
+        try {
+            Files.createDirectories(summaryPath.getParent());
+            try (FileWriter writer = new FileWriter(summaryPath.toFile())) {
+                writer.write(summary);
+            }
         } catch (IOException e) {
-            System.err.println("Failed to write to session_summary.txt: " + e.getMessage());
+            System.err.println("Failed to write to " + summaryPath + ": " + e.getMessage());
         }
 
         // Save to CentralMemory
@@ -58,7 +65,7 @@ public class RememberCommand implements Command {
         context.getCentralMemory().saveMemory(projectPath, summary);
 
         System.out.println(MkPro.ANSI_GREEN + "Session remembered successfully!" + MkPro.ANSI_RESET);
-        System.out.println(MkPro.ANSI_CYAN + "Summary saved to session_summary.txt and CentralMemory." + MkPro.ANSI_RESET);
+        System.out.println(MkPro.ANSI_CYAN + "Summary saved to " + summaryPath + " and CentralMemory." + MkPro.ANSI_RESET);
     }
 
     @Override
