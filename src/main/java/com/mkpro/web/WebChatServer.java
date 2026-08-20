@@ -262,8 +262,8 @@ public class WebChatServer {
             String type = msg.has("type") ? msg.get("type").asText() : "";
             String sender = msg.has("sender") ? msg.get("sender").asText() : "unknown";
 
-            if ("user_input".equals(type)) {
-                String text = msg.has("text") ? msg.get("text").asText().trim() : "";
+            if ("user_input".equals(type) || "chat".equals(type)) {
+                String text = msg.has("text") ? msg.get("text").asText().trim() : (msg.has("message") ? msg.get("message").asText().trim() : "");
 
                 // Broadcast the user message to OTHER web clients (not the sender)
                 ObjectNode userMsg = createMessage("user_message");
@@ -325,48 +325,6 @@ public class WebChatServer {
             // Ignore malformed messages
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     private void serveResource(com.sun.net.httpserver.HttpExchange exchange, String resourcePath, String contentType) throws IOException {
         try (InputStream is = getClass().getResourceAsStream(resourcePath)) {

@@ -68,13 +68,17 @@ graph TD
 | `MkProContext` | Application state container passed to commands and UI |
 | `TerminalUI` | JLine-based interactive terminal loop |
 
-### CentralMemory Architecture
+### CentralMemory Architecture & Modernized Storage
 
-CentralMemory uses a **hot/shared split** for multi-instance safety:
+CentralMemory uses a **hot/shared split** for multi-instance safety with a fully modernized, platform-aware storage layout:
 
 - **Hot Store** (per-instance, always open): Agent statistics — high-frequency writes with zero contention between instances.
 - **Shared Store** (brief file lock with retry): Agent configs, goals, memories, MCP servers — opened briefly for writes, reads served from in-memory cache.
 - **Local Cache**: `ConcurrentHashMap` for configs, volatile lists for servers. Populated on startup, invalidated on writes, refreshable via `refreshCache()` when SyncEngine receives peer updates.
+- **Platform-Aware Directory Standards**: Stores databases, configs, caches, and logs in OS-standard locations:
+  - **Windows**: `%APPDATA%\mkpro` (roaming/shared data and configuration) and `%LOCALAPPDATA%\mkpro` (local cache/temp).
+  - **Linux / macOS**: `$XDG_CONFIG_HOME/mkpro` (or `~/.config/mkpro`) and `$XDG_DATA_HOME/mkpro` (or `~/.local/share/mkpro`).
+- **Zero Workspace Root Pollution**: All persistent databases, telemetry, and temporary files reside cleanly within the user's OS application directories, keeping repository workspaces untainted.
 
 ### Declarative Tool Assignment
 
@@ -139,6 +143,16 @@ Turn complete → predict completion → if P≥75%: COMPLETE
                                    → else: CONTINUE (inject stimulus)
 ```
 
+## 🎓 Academic Research View (`/academic`)
+
+The **Academic Research View** at `http://localhost:8080/academic` provides a distraction-free, publication-styled workbench optimized for in-depth code reading, literature synthesis, and architectural research:
+
+- **Minimalist Editorial Aesthetics**: Clean, borderless paper layout with **EB Garamond** serif typography for an authentic print/typeset reading experience.
+- **On-Demand Slide-over File Explorer**: A non-intrusive drawer accessible via the header toggle or keyboard shortcut `Ctrl+B`, keeping project navigation out of the way until needed.
+- **Line-Numbered Manuscript Inspector**: Elegant file and artifact viewer featuring line numbers, monospaced code styling, and fast scrolling for code review.
+- **Multi-Modal Lightbox Zoom**: Direct clipboard image pasting (`Ctrl+V`) into the chat stream with interactive thumbnail previews and 1-click fullscreen Lightbox zoom.
+- **1-Click Response Copying**: Quick-copy buttons on every message bubble and code block for instant extraction of notes, snippets, or summaries.
+
 ## 🛡️ Safety & Security
 
 ### Defense-in-Depth
@@ -155,8 +169,8 @@ Turn complete → predict completion → if P≥75%: COMPLETE
 
 - **Automatic Backups**: `CodeEditor` creates backups before modifications (`Maker.backItUp`).
 - **Enforced Role Delegation**: `SysAdmin` cannot modify code directly — must delegate to `CodeEditor`.
-- **Configurable Policy**: Users can customize the command allowlist via `~/.mkpro/command_policy.yaml`.
-- **Manual Emergency Revocation**: Operators can immediately block compromised nodes by removing them from `~/.mkpro/p2p_whitelist.txt`.
+- **Configurable Policy**: Users can customize the command allowlist via OS config directories (`%APPDATA%\mkpro\command_policy.yaml` or `~/.config/mkpro/command_policy.yaml`).
+- **Manual Emergency Revocation**: Operators can immediately block compromised nodes by removing them from the whitelist file.
 
 ### mTLS & Mesh Operations
 
@@ -171,7 +185,8 @@ For detailed mTLS procedures, refer to:
 
 ## 🚀 Key Features
 
-- **Web UI**: Optional browser-based chat interface (`--web` flag). Markdown rendering, syntax highlighting, real-time streaming via WebSocket. Commands work from web too. Includes MapDB browser (`/db`) and Knowledge dashboard (`/knowledge`).
+- **Web UI & Academic Research Workbench**: Optional browser-based interfaces (`--web` flag) with Markdown rendering, syntax highlighting, and real-time WebSocket streaming. Includes the standard chat (`/`), Academic Research View (`/academic`), MapDB browser (`/db`), and Knowledge dashboard (`/knowledge`).
+- **Modernized Platform-Aware Storage**: Data and configuration are placed in standard OS locations (`%APPDATA%` on Windows, `$XDG_*` on Linux/macOS) ensuring zero workspace root pollution.
 - **Groovy Script Engine**: Sandboxed Groovy execution for data processing. Agents use `execute_script`, `create_script`, `list_scripts` tools. Scripts persist in CentralMemory, blocked from Runtime/ProcessBuilder/Thread/networking. 30s timeout.
 - **Fact Engine**: Verified math formulas (77 with Groovy scripts) + relationship graph (151+ triples). Pre-turn injection of relevant facts, post-turn validation for conflicts. Agents use `verify_fact` tool to compute formulas or check technology relationships. Confidence-scored edges (1.0 static, 0.8 extracted, 0.9 project). See [FactEngine docs](README_fe.md).
 - **Project Fact Discovery**: `/index` scans source files for constants, dependencies, config constraints. `/index --deep` uses LLM to analyze key files for architectural patterns, formulas, and relationships. Discovered facts persist to MapDB across sessions.
@@ -194,10 +209,7 @@ For detailed mTLS procedures, refer to:
 - **Autonomous Memory**: Agents can commit insights to CentralMemory (`commit_to_memory`) and recall them later — persists across sessions.
 - **Session State Injection**: Coordinator starts each session aware of pending goals, project memory, and MCP context from prior sessions.
 - **Training Data Export**: `/export` extracts all 15 agents' sessions as JSONL for fine-tuning your own SLM.
-- **Clipboard Integration**: Paste text or images directly into the terminal using `Ctrl+V`.
-- **Persistent Memory**:
-    - **Shared Store**: Configs and goals saved to `~/Documents/mkpro/central_memory.db`.
-    - **Local Store**: Per-instance stats in `.mkpro/` project directory.
+- **Clipboard Integration**: Paste text or images directly into the terminal or web views using `Ctrl+V`.
 - **Multi-Provider**: Seamless switching between **Ollama** (Local), **JLama** (Pure Java LLM), **Gemini** (Google), **Bedrock** (AWS), **Azure** (OpenAI), and **Sarvam**.
 - **Multi-Runner Support**: Choose between **InMemory**, **MapDB** (persistent), and **Postgres** (enterprise) execution environments.
 - **Background Jobs**: Start, monitor, and stop background processes directly from the chat.
@@ -272,7 +284,7 @@ For detailed mTLS procedures, refer to:
 
 ## ⚙️ Dynamic Model Registry & Sync
 
-- **Dynamic Loading**: Model lists for **Gemini**, **Bedrock**, and **Azure** are loaded from `models.yaml`. Local version in `Documents/mkpro/models.yaml` takes priority over bundled defaults.
+- **Dynamic Loading**: Model lists for **Gemini**, **Bedrock**, and **Azure** are loaded from `models.yaml`. Local user configurations in the platform data directory take priority over bundled defaults.
 - **Weekly Git Syncing**: Background sync pulls latest model definitions from a remote Git repository.
 - **Customizable Remote**: Set `models.remote.url` in `config.properties` to use your own manifest.
 - **Real-time Ollama Detection**: Ollama models are fetched dynamically from your local server's `/api/tags` endpoint — always reflects your current local library.
@@ -343,7 +355,7 @@ mvn clean install
 
 ### Configuration
 
-Set your environment variables or configure via `~/Documents/mkpro/config.properties`:
+Set your environment variables or configure via `config.properties` in your user config directory (`%APPDATA%\mkpro\config.properties` on Windows or `~/.config/mkpro/config.properties` on Linux/macOS):
 ```bash
 # For Gemini
 export GOOGLE_API_KEY=your_google_api_key
@@ -361,7 +373,7 @@ Launch the CLI:
 java -jar target/mkpro-4.5.0.jar
 ```
 
-With Web UI (opens browser chat at http://localhost:8080):
+With Web UI (opens browser chat at http://localhost:8080 and Academic view at http://localhost:8080/academic):
 ```bash
 java -jar target/mkpro-4.5.0.jar --web
 java -jar target/mkpro-4.5.0.jar --web 9090   # custom port

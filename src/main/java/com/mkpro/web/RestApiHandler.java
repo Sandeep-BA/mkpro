@@ -81,6 +81,14 @@ class RestApiHandler {
                 handleGitBranchApi(exchange); return true;
             case "/api/git/switch":
                 handleGitSwitchApi(exchange); return true;
+            case "/api/models":
+                handleModelsApi(exchange); return true;
+            case "/api/teams":
+                handleTeamsApi(exchange); return true;
+            case "/api/goals":
+                handleGoalsApi(exchange); return true;
+            case "/api/sessions/new":
+                handleNewSessionApi(exchange); return true;
             default:
                 // Prefix-based routes
                 if (path.startsWith("/api/knowledge/search")) {
@@ -789,6 +797,43 @@ class RestApiHandler {
         } catch (Exception e) {
             try { sendJsonError(exchange, 500, e.getMessage()); } catch (Exception ignored) {}
         }
+    }
+
+    // ========================================================================
+    // New API Handlers
+    // ========================================================================
+
+    private void handleModelsApi(HttpExchange exchange) throws IOException {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("models", com.mkpro.config.ModelRegistry.getAllModels());
+        List<String> providers = Arrays.stream(com.mkpro.models.Provider.values())
+            .map(Enum::name)
+            .collect(Collectors.toList());
+        response.put("providers", providers);
+        sendJsonResponse(exchange, 200, response);
+    }
+
+    private void handleTeamsApi(HttpExchange exchange) throws IOException {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("teams", List.of("full", "coding", "minimal", "sysadmin", "research", "data_science"));
+        response.put("active", "full");
+        sendJsonResponse(exchange, 200, response);
+    }
+
+    private void handleGoalsApi(HttpExchange exchange) throws IOException {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("goals", centralMemory != null ? centralMemory.getGoals(".") : List.of());
+        sendJsonResponse(exchange, 200, response);
+    }
+
+    private void handleNewSessionApi(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1); return;
+        }
+        if (commandRegistry != null && mkproContext != null) {
+            commandRegistry.executeCommand("/new", mkproContext);
+        }
+        sendJsonResponse(exchange, 200, Map.of("status", "session_reset"));
     }
 
     // ========================================================================
