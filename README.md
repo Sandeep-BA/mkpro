@@ -1,6 +1,6 @@
 # mkpro - The AI Software Engineering Team
 
-`mkpro` is an advanced, modular CLI assistant built on the Google Agent Development Kit (ADK). It orchestrates a team of **15 specialized AI agents** to autonomously handle complex software engineering tasks, from coding and testing to security audits and cloud deployment. It supports a multi-provider backend, allowing you to mix and match local models (Ollama) with powerful cloud models (Gemini, Bedrock, Azure).
+`mkpro` is an advanced, modular CLI assistant built on the Google Agent Development Kit (ADK). It orchestrates a team of **15 specialized AI agents** to autonomously handle complex software engineering tasks, from coding and testing to security audits and cloud deployment. It supports a multi-provider backend, allowing you to mix and match local models (Ollama, Jlama) with powerful cloud models (Gemini, Bedrock, Azure, Sarvam).
 
 ## 🤖 Meet the Team
 
@@ -198,7 +198,7 @@ For detailed mTLS procedures, refer to:
 - **Persistent Memory**:
     - **Shared Store**: Configs and goals saved to `~/Documents/mkpro/central_memory.db`.
     - **Local Store**: Per-instance stats in `.mkpro/` project directory.
-- **Multi-Provider**: Seamless switching between **Ollama** (Local), **Gemini** (Google), **Bedrock** (AWS), **Azure** (OpenAI), and **Sarvam**.
+- **Multi-Provider**: Seamless switching between **Ollama** (Local), **JLama** (Pure Java LLM), **Gemini** (Google), **Bedrock** (AWS), **Azure** (OpenAI), and **Sarvam**.
 - **Multi-Runner Support**: Choose between **InMemory**, **MapDB** (persistent), and **Postgres** (enterprise) execution environments.
 - **Background Jobs**: Start, monitor, and stop background processes directly from the chat.
 - **MCP Server Integration**: Connect to MCP servers for Figma design-to-code, browser automation, and more.
@@ -216,6 +216,11 @@ For detailed mTLS procedures, refer to:
 | `/ollama list` | Show all active Ollama endpoints |
 | `/ollama models [name]` | Fetch models from a specific server |
 | `/ollama status` | Check connectivity of all servers |
+| `/jlama` | Manage local Jlama models (download, list, rm) |
+| `/jlama download <model>` | Download a model from HuggingFace |
+| `/jlama list` | List downloaded Jlama models |
+| `/jlama models` | Show recommended pre-quantized Jlama models |
+| `/jlama rm <model>` | Remove a downloaded local Jlama model |
 | `/team` | Swap entire team structures |
 | `/stats` | View token usage statistics |
 | `/visualize` | Visualize the graph memory |
@@ -297,25 +302,44 @@ Models are auto-detected from your local Ollama server. Recommended models:
 | **Devstral** | Fast coding agent |
 | **Command R** | Retrieval & Long Context |
 
+## ☕ Supported Jlama Models (Pure Java LLM)
+
+Jlama runs model inference directly inside the JVM without external daemons or GPU dependencies. Recommended pre-quantized models:
+
+| Model | Size | Best For |
+| :--- | :--- | :--- |
+| **tjake/Llama-3.2-1B-Instruct-JQ4** | ~700 MB | Fast responses, lightweight CPU inference |
+| **tjake/Qwen2.5-1.5B-Instruct-JQ4** | ~900 MB | Fast reasoning & multilingual support |
+| **tjake/Llama-3.2-3B-Instruct-JQ4** | ~1.8 GB | Balanced reasoning & speed |
+| **tjake/Mistral-7B-Instruct-v0.3-JQ4** | ~4.1 GB | General coding & engineering tasks |
+| **tjake/Meta-Llama-3.1-8B-Instruct-JQ4** | ~4.5 GB | Complex tasks & deep reasoning |
+| **tjake/Qwen2.5-7B-Instruct-JQ4** | ~4.2 GB | Polyglot coding & complex instructions |
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Java 21+**
+- **Java 21+** (Vector incubator module recommended for Jlama SIMD acceleration: `--add-modules jdk.incubator.vector`)
 - **Maven**
-- **Google Cloud API Key** (for Gemini) or **AWS Credentials** (for Bedrock) or **Ollama** installed (for local models).
+- **Google Cloud API Key** (for Gemini) or **AWS Credentials** (for Bedrock) or **Ollama** / **Jlama** (for local models).
 
 ### Installation
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/redbus-labs/mkpro.git
-   cd mkpro
-   ```
-2. Build the project:
-   ```bash
-   mvn clean install
-   ```
+#### 1. (Optional) Build and Install JLama from Source
+If building and installing the JLama project from source:
+```bash
+git clone https://github.com/redbus-labs/Jlama.git
+cd Jlama
+mvn clean install -DskipTests
+cd ..
+```
+
+#### 2. Clone and Build mkpro
+```bash
+git clone https://github.com/redbus-labs/mkpro.git
+cd mkpro
+mvn clean install
+```
 
 ### Configuration
 
@@ -334,19 +358,19 @@ export AWS_REGION=your_region
 
 Launch the CLI:
 ```bash
-java -jar target/mkpro-4.1.2.jar
+java -jar target/mkpro-4.5.0.jar
 ```
 
 With Web UI (opens browser chat at http://localhost:8080):
 ```bash
-java -jar target/mkpro-4.1.2.jar --web
-java -jar target/mkpro-4.1.2.jar --web 9090   # custom port
+java -jar target/mkpro-4.5.0.jar --web
+java -jar target/mkpro-4.5.0.jar --web 9090   # custom port
 ```
 
 With Knowledge Scheduler (autonomous knowledge accumulation):
 ```bash
-java -jar target/mkpro-4.1.2.jar --scheduler
-java -jar target/mkpro-4.1.2.jar --web --scheduler   # both web UI + scheduler
+java -jar target/mkpro-4.5.0.jar --scheduler
+java -jar target/mkpro-4.5.0.jar --web --scheduler   # both web UI + scheduler
 ```
 
 Or use the native executable (Windows):
