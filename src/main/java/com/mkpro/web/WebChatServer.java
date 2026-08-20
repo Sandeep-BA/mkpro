@@ -130,14 +130,14 @@ public class WebChatServer {
         httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
         httpServer.createContext("/", exchange -> {
             String path = exchange.getRequestURI().getPath();
-            if ("/".equals(path) || "/index.html".equals(path)) {
-                serveResource(exchange, "/web/index.html", "text/html");
-            } else if ("/db".equals(path)) {
-                serveResource(exchange, "/web/db.html", "text/html");
-            } else if ("/knowledge".equals(path)) {
-                serveResource(exchange, "/web/knowledge.html", "text/html");
-            } else if ("/academic".equals(path)) {
+            if ("/".equals(path) || "/index.html".equals(path) || "/academic".equals(path) || "/academic.html".equals(path) || "/academic_view.html".equals(path)) {
                 serveResource(exchange, "/web/academic_view.html", "text/html");
+            } else if ("/classic".equals(path) || "/classic/".equals(path) || "/classic.html".equals(path)) {
+                serveResource(exchange, "/web/index.html", "text/html");
+            } else if ("/db".equals(path) || "/db.html".equals(path)) {
+                serveResource(exchange, "/web/db.html", "text/html");
+            } else if ("/knowledge".equals(path) || "/knowledge.html".equals(path)) {
+                serveResource(exchange, "/web/knowledge.html", "text/html");
             } else if (restApiHandler.handle(exchange, path)) {
                 // Handled by RestApiHandler
             } else {
