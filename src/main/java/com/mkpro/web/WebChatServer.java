@@ -136,6 +136,8 @@ public class WebChatServer {
                 serveResource(exchange, "/web/db.html", "text/html");
             } else if ("/knowledge".equals(path)) {
                 serveResource(exchange, "/web/knowledge.html", "text/html");
+            } else if ("/academic".equals(path)) {
+                serveResource(exchange, "/web/academic_view.html", "text/html");
             } else if (restApiHandler.handle(exchange, path)) {
                 // Handled by RestApiHandler
             } else {

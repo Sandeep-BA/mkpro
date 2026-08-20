@@ -3,6 +3,7 @@ package com.mkpro.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.mkpro.security.PathValidator;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -987,10 +988,11 @@ class RestApiHandler {
                 }
             }
 
-            java.nio.file.Path projectRoot = java.nio.file.Paths.get("").toAbsolutePath();
-            java.nio.file.Path targetDir = projectRoot.resolve(relativePath).normalize();
-            if (!targetDir.startsWith(projectRoot)) {
-                byte[] err = "{\"error\":\"Access denied\"}".getBytes(StandardCharsets.UTF_8);
+            java.nio.file.Path targetDir;
+            try {
+                targetDir = PathValidator.getInstance().validateForRead(relativePath.isEmpty() ? "." : relativePath);
+            } catch (SecurityException se) {
+                byte[] err = ("{\"error\":\"Access denied: " + se.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
                 exchange.sendResponseHeaders(403, err.length);
                 try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
@@ -1074,10 +1076,11 @@ class RestApiHandler {
                 return;
             }
 
-            java.nio.file.Path projectRoot = java.nio.file.Paths.get("").toAbsolutePath();
-            java.nio.file.Path targetFile = projectRoot.resolve(relativePath).normalize();
-            if (!targetFile.startsWith(projectRoot)) {
-                byte[] err = "{\"error\":\"Access denied\"}".getBytes(StandardCharsets.UTF_8);
+            java.nio.file.Path targetFile;
+            try {
+                targetFile = PathValidator.getInstance().validateForRead(relativePath);
+            } catch (SecurityException se) {
+                byte[] err = ("{\"error\":\"Access denied: " + se.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
                 exchange.sendResponseHeaders(403, err.length);
                 try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
@@ -1141,11 +1144,13 @@ class RestApiHandler {
                 exchange.sendResponseHeaders(400, -1); exchange.close(); return;
             }
 
-            java.nio.file.Path projectRoot = java.nio.file.Paths.get("").toAbsolutePath();
-            java.nio.file.Path targetFile = projectRoot.resolve(relativePath).normalize();
-            if (!targetFile.startsWith(projectRoot)) {
+            java.nio.file.Path targetFile;
+            try {
+                targetFile = PathValidator.getInstance().validateForRead(relativePath);
+            } catch (SecurityException se) {
                 exchange.sendResponseHeaders(403, -1); exchange.close(); return;
             }
+
             if (!java.nio.file.Files.isRegularFile(targetFile)) {
                 exchange.sendResponseHeaders(404, -1); exchange.close(); return;
             }
