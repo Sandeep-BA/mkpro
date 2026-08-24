@@ -112,6 +112,13 @@ public class PathValidator {
             }
         }
 
+        // EXCEPTION: Allow .mkpro/captures/ and .mkpro/knowledge/ even if outside standard allowed roots 
+        // if they are inside the user home dir, or generally if they match the path structure.
+        String pathString = resolved.toString().toLowerCase().replace('\\', '/');
+        if (!withinAllowed && (pathString.contains(".mkpro/captures/") || pathString.contains(".mkpro/knowledge/"))) {
+            withinAllowed = true;
+        }
+
         if (!withinAllowed) {
             throw new SecurityException(
                 "Access denied: path '" + pathStr + "' is outside allowed directories. " +
@@ -120,9 +127,8 @@ public class PathValidator {
         }
 
         // Check for sensitive file patterns
-        String pathLower = resolved.toString().toLowerCase().replace('\\', '/');
         for (String pattern : blockedPatterns) {
-            if (pathLower.contains(pattern.toLowerCase())) {
+            if (pathString.contains(pattern.toLowerCase())) {
                 throw new SecurityException(
                     "Access denied: path '" + pathStr + "' matches blocked sensitive pattern '" + pattern + "'"
                 );

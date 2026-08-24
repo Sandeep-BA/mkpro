@@ -294,6 +294,7 @@
             word-break: break-word;
         }
         .preview-content img { max-width: 100%; height: auto; display: block; }
+        .message .content img, .message img { max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block; cursor: zoom-in; }
         .preview-content iframe { width: 100%; height: 100%; border: none; }
         .preview-content canvas { width: 100%; height: 100%; }
         .preview-actions {
@@ -668,6 +669,7 @@
         <div class="chat-container">
             <button class="sidebar-toggle-external" onclick="toggleSidebar()" title="Show file browser">📁</button>
             <div class="command-bar">
+                <button class="cmd-btn" onclick="runCommand('/capture')">📸 Capture</button>
                 <button class="cmd-btn" onclick="runCommand('/status')">📊 Status</button>
                 <button class="cmd-btn" onclick="runCommand('/stats')">📈 Stats</button>
                 <button class="cmd-btn" onclick="runCommand('/know topics')">🧠 Topics</button>
@@ -1194,10 +1196,33 @@
                 if (contentDiv) {
                     contentDiv.innerHTML = marked.parse(streamBuffer);
                     contentDiv.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+                    postProcessImages(contentDiv);
                 }
             }
             currentMessage = null;
             streamBuffer = '';
+        }
+
+        function postProcessImages(container) {
+            if (!container) return;
+            container.querySelectorAll('img').forEach(img => {
+                const src = img.getAttribute('src') || '';
+                // If it's a relative workspace path, route through /api/file-raw, leaving data: intact
+                if (src && !src.startsWith('data:') && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('/') && !src.startsWith('blob:')) {
+                    img.src = '/api/file-raw?path=' + encodeURIComponent(src);
+                }
+                img.style.cursor = 'zoom-in';
+                img.onclick = () => {
+                    if (src.startsWith('data:')) {
+                        const w = window.open('');
+                        if (w) {
+                            w.document.write(`<title>${escapeHtml(img.alt || 'Screenshot')}</title><body style="margin:0;background:#1a1b26;display:flex;align-items:center;justify-content:center;height:100vh;"><img src="${src}" style="max-width:95vw;max-height:95vh;object-fit:contain;" /></body>`);
+                        }
+                    } else {
+                        window.open(img.src, '_blank');
+                    }
+                };
+            });
         }
 
         function scrollToBottom() {
@@ -1358,6 +1383,7 @@
                     } else {
                         div.className = 'message assistant';
                         div.innerHTML = `<span class="agent-badge">${escapeHtml(msg.role)}</span><div class="content">${marked.parse(msg.text)}</div><div class="timestamp">${formatHistoryTimestamp(msg.timestamp)}</div>`;
+                        postProcessImages(div.querySelector('.content'));
                     }
                     fragment.appendChild(div);
                 }

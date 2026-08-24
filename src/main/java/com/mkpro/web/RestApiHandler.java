@@ -7,8 +7,14 @@ import com.mkpro.security.PathValidator;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -95,7 +101,7 @@ class RestApiHandler {
                     serveKnowledgeSearchApi(exchange); return true;
                 } else if (path.startsWith("/api/files")) {
                     serveFilesApi(exchange); return true;
-                } else if (path.startsWith("/api/file-content")) {
+                } else if (path.equals("/api/file") || path.startsWith("/api/file-content")) {
                     serveFileContentApi(exchange); return true;
                 } else if (path.startsWith("/api/file-raw")) {
                     serveFileRawApi(exchange); return true;
@@ -898,7 +904,7 @@ class RestApiHandler {
             if (rawQuery != null) {
                 for (String param : rawQuery.split("&")) {
                     if (param.startsWith("name=")) {
-                        name = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        name = URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
                     }
                 }
             }
@@ -968,7 +974,7 @@ class RestApiHandler {
             if (rawQuery != null) {
                 for (String param : rawQuery.split("&")) {
                     if (param.startsWith("q=")) {
-                        query = java.net.URLDecoder.decode(param.substring(2), StandardCharsets.UTF_8);
+                        query = URLDecoder.decode(param.substring(2), StandardCharsets.UTF_8);
                     }
                 }
             }
@@ -1028,35 +1034,29 @@ class RestApiHandler {
             if (rawQuery != null) {
                 for (String param : rawQuery.split("&")) {
                     if (param.startsWith("path=")) {
-                        relativePath = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        relativePath = URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
                     }
                 }
             }
 
-            java.nio.file.Path targetDir;
+            Path targetDir;
             try {
                 targetDir = PathValidator.getInstance().validateForRead(relativePath.isEmpty() ? "." : relativePath);
             } catch (SecurityException se) {
-                byte[] err = ("{\"error\":\"Access denied: " + se.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-                exchange.sendResponseHeaders(403, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+                sendJsonError(exchange, 403, "Access denied: " + se.getMessage());
                 return;
             }
 
-            if (!java.nio.file.Files.isDirectory(targetDir)) {
-                byte[] err = "{\"error\":\"Not a directory\"}".getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-                exchange.sendResponseHeaders(404, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+            if (!Files.isDirectory(targetDir)) {
+                sendJsonError(exchange, 404, "Not a directory: " + relativePath);
                 return;
             }
 
             List<Map<String, Object>> entries = new ArrayList<>();
-            try (java.nio.file.DirectoryStream<java.nio.file.Path> stream = java.nio.file.Files.newDirectoryStream(targetDir)) {
-                for (java.nio.file.Path entry : stream) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(targetDir)) {
+                for (Path entry : stream) {
                     String name = entry.getFileName().toString();
-                    boolean isDir = java.nio.file.Files.isDirectory(entry);
+                    boolean isDir = Files.isDirectory(entry);
 
                     if (isDir && EXCLUDED_DIRS.contains(name)) continue;
                     if (name.startsWith(".") && !name.equals(".mkpro")) continue;
@@ -1066,7 +1066,7 @@ class RestApiHandler {
                     item.put("type", isDir ? "directory" : "file");
                     if (!isDir) {
                         try {
-                            item.put("size", java.nio.file.Files.size(entry));
+                            item.put("size", Files.size(entry));
                         } catch (Exception e) {
                             item.put("size", 0);
                         }
@@ -1086,18 +1086,10 @@ class RestApiHandler {
             response.put("path", relativePath.isEmpty() ? "." : relativePath);
             response.put("entries", entries);
 
-            String json = mapper.writeValueAsString(response);
-            byte[] content = json.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-            exchange.sendResponseHeaders(200, content.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(content); }
+            sendJsonResponse(exchange, 200, response);
 
         } catch (Exception e) {
-            byte[] err = ("{\"error\":\"" + e.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.sendResponseHeaders(500, err.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+            sendJsonError(exchange, 500, e.getMessage());
         }
     }
 
@@ -1108,68 +1100,60 @@ class RestApiHandler {
             if (rawQuery != null) {
                 for (String param : rawQuery.split("&")) {
                     if (param.startsWith("path=")) {
-                        relativePath = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        relativePath = URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
                     }
                 }
             }
 
             if (relativePath.isEmpty()) {
-                byte[] err = "{\"error\":\"path parameter required\"}".getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-                exchange.sendResponseHeaders(400, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+                sendJsonError(exchange, 400, "path parameter required");
                 return;
             }
 
-            java.nio.file.Path targetFile;
+            Path targetFile;
             try {
                 targetFile = PathValidator.getInstance().validateForRead(relativePath);
             } catch (SecurityException se) {
-                byte[] err = ("{\"error\":\"Access denied: " + se.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-                exchange.sendResponseHeaders(403, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+                sendJsonError(exchange, 403, "Access denied: " + se.getMessage());
                 return;
             }
 
-            if (!java.nio.file.Files.isRegularFile(targetFile)) {
-                byte[] err = "{\"error\":\"File not found\"}".getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-                exchange.sendResponseHeaders(404, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+            if (!Files.isRegularFile(targetFile)) {
+                sendJsonError(exchange, 404, "File not found: " + relativePath);
                 return;
             }
 
-            long fileSize = java.nio.file.Files.size(targetFile);
+            long fileSize = Files.size(targetFile);
+            String filename = targetFile.getFileName().toString();
+            String mime = getMimeType(targetFile);
+            boolean isBinary = isBinaryFile(targetFile, mime);
+
             String fileContent;
-            if (fileSize > 10240) {
-                byte[] bytes = new byte[10240];
-                try (java.io.InputStream is = java.nio.file.Files.newInputStream(targetFile)) {
-                    is.read(bytes);
+            if (isBinary) {
+                fileContent = "[Binary file: " + mime + ", " + fileSize + " bytes. Use /api/file-raw?path=" + URLEncoder.encode(relativePath, StandardCharsets.UTF_8) + " to view or download]";
+            } else if (fileSize > 51200) {
+                byte[] bytes = new byte[51200];
+                try (InputStream is = Files.newInputStream(targetFile)) {
+                    int read = is.read(bytes);
+                    fileContent = new String(bytes, 0, Math.max(0, read), StandardCharsets.UTF_8) + "\n... [truncated at 50KB, total " + fileSize + " bytes]";
                 }
-                fileContent = new String(bytes, StandardCharsets.UTF_8) + "\n... [truncated at 10KB, total " + fileSize + " bytes]";
             } else {
-                fileContent = java.nio.file.Files.readString(targetFile, StandardCharsets.UTF_8);
+                fileContent = Files.readString(targetFile, StandardCharsets.UTF_8);
             }
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("path", relativePath);
-            response.put("name", targetFile.getFileName().toString());
+            response.put("name", filename);
             response.put("size", fileSize);
+            response.put("mimeType", mime);
+            response.put("isBinary", isBinary);
+            response.put("rawUrl", "/api/file-raw?path=" + URLEncoder.encode(relativePath, StandardCharsets.UTF_8));
             response.put("content", fileContent);
 
-            String json = mapper.writeValueAsString(response);
-            byte[] content = json.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-            exchange.sendResponseHeaders(200, content.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(content); }
+            sendJsonResponse(exchange, 200, response);
 
         } catch (Exception e) {
-            byte[] err = ("{\"error\":\"" + e.getMessage() + "\"}").getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.sendResponseHeaders(500, err.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+            sendJsonError(exchange, 500, e.getMessage());
         }
     }
 
@@ -1180,63 +1164,161 @@ class RestApiHandler {
             if (rawQuery != null) {
                 for (String param : rawQuery.split("&")) {
                     if (param.startsWith("path=")) {
-                        relativePath = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        relativePath = URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
                     }
                 }
             }
 
             if (relativePath.isEmpty()) {
-                exchange.sendResponseHeaders(400, -1); exchange.close(); return;
-            }
-
-            java.nio.file.Path targetFile;
-            try {
-                targetFile = PathValidator.getInstance().validateForRead(relativePath);
-            } catch (SecurityException se) {
-                exchange.sendResponseHeaders(403, -1); exchange.close(); return;
-            }
-
-            if (!java.nio.file.Files.isRegularFile(targetFile)) {
-                exchange.sendResponseHeaders(404, -1); exchange.close(); return;
-            }
-
-            String name = targetFile.getFileName().toString().toLowerCase();
-            String mime = getMimeType(name);
-
-            long size = java.nio.file.Files.size(targetFile);
-            if (size > 20 * 1024 * 1024) {
-                byte[] err = "File too large (>20MB)".getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(413, err.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+                sendJsonError(exchange, 400, "path parameter required");
                 return;
             }
 
-            byte[] content = java.nio.file.Files.readAllBytes(targetFile);
+            Path targetFile;
+            try {
+                targetFile = PathValidator.getInstance().validateForRead(relativePath);
+            } catch (SecurityException se) {
+                sendJsonError(exchange, 403, "Access denied: " + se.getMessage());
+                return;
+            }
+
+            if (!Files.isRegularFile(targetFile)) {
+                sendJsonError(exchange, 404, "File not found: " + relativePath);
+                return;
+            }
+
+            long size = Files.size(targetFile);
+            if (size > 100 * 1024 * 1024) {
+                sendJsonError(exchange, 413, "File too large (>100MB)");
+                return;
+            }
+
+            String mime = getMimeType(targetFile);
+            String filename = targetFile.getFileName().toString();
+            String safeFilename = filename.replaceAll("[\"\\r\\n]", "_");
+
             exchange.getResponseHeaders().set("Content-Type", mime);
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-            exchange.getResponseHeaders().set("Content-Disposition", "inline; filename=\"" + targetFile.getFileName() + "\"");
-            exchange.sendResponseHeaders(200, content.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(content); }
+            exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
+            exchange.getResponseHeaders().set("Content-Disposition", "inline; filename=\"" + safeFilename + "\"");
+
+            // Stream file efficiently without buffering whole file in RAM
+            exchange.sendResponseHeaders(200, size);
+            try (InputStream is = Files.newInputStream(targetFile);
+                 OutputStream os = exchange.getResponseBody()) {
+                is.transferTo(os);
+                os.flush();
+            }
 
         } catch (Exception e) {
-            exchange.sendResponseHeaders(500, -1); exchange.close();
+            try {
+                sendJsonError(exchange, 500, e.getMessage());
+            } catch (Exception ignored) {}
         }
     }
 
-    private String getMimeType(String filename) {
-        if (filename.endsWith(".pdf")) return "application/pdf";
-        if (filename.endsWith(".svg")) return "image/svg+xml";
-        if (filename.endsWith(".png")) return "image/png";
-        if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
-        if (filename.endsWith(".gif")) return "image/gif";
-        if (filename.endsWith(".webp")) return "image/webp";
-        if (filename.endsWith(".stl")) return "model/stl";
-        if (filename.endsWith(".obj")) return "text/plain";
-        if (filename.endsWith(".dxf")) return "text/plain";
-        if (filename.endsWith(".html")) return "text/html";
-        if (filename.endsWith(".json")) return "application/json";
-        if (filename.endsWith(".xml")) return "application/xml";
-        if (filename.endsWith(".csv")) return "text/csv";
+    static String getMimeType(Path file) {
+        if (file == null || file.getFileName() == null) {
+            return "application/octet-stream";
+        }
+        return getMimeType(file.getFileName().toString());
+    }
+
+    static String getMimeType(String filename) {
+        if (filename == null) return "application/octet-stream";
+        String lower = filename.toLowerCase();
+
+        // Documents & Formats
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (lower.endsWith(".doc")) return "application/msword";
+        if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+
+        // Images
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".ico")) return "image/x-icon";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".tiff") || lower.endsWith(".tif")) return "image/tiff";
+        if (lower.endsWith(".avif")) return "image/avif";
+
+        // 3D & Models
+        if (lower.endsWith(".stl")) return "model/stl";
+        if (lower.endsWith(".obj")) return "text/plain";
+        if (lower.endsWith(".gltf")) return "model/gltf+json";
+        if (lower.endsWith(".glb")) return "model/gltf-binary";
+        if (lower.endsWith(".dxf")) return "text/plain";
+        if (lower.endsWith(".step") || lower.endsWith(".stp")) return "application/step";
+
+        // Web & Data
+        if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
+        if (lower.endsWith(".css")) return "text/css";
+        if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "application/javascript";
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".xml")) return "application/xml";
+        if (lower.endsWith(".csv")) return "text/csv";
+        if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "text/markdown";
+        if (lower.endsWith(".txt") || lower.endsWith(".log")) return "text/plain";
+
+        // Source Code & Config (Text)
+        if (lower.endsWith(".java") || lower.endsWith(".py") || lower.endsWith(".c") ||
+            lower.endsWith(".cpp") || lower.endsWith(".h") || lower.endsWith(".hpp") ||
+            lower.endsWith(".rs") || lower.endsWith(".go") || lower.endsWith(".kt") ||
+            lower.endsWith(".swift") || lower.endsWith(".sh") || lower.endsWith(".bat") ||
+            lower.endsWith(".ps1") || lower.endsWith(".groovy") || lower.endsWith(".yaml") ||
+            lower.endsWith(".yml") || lower.endsWith(".toml") || lower.endsWith(".properties") ||
+            lower.endsWith(".sql") || lower.endsWith(".ts") || lower.endsWith(".tsx") ||
+            lower.endsWith(".jsx")) {
+            return "text/plain";
+        }
+
+        // Archives
+        if (lower.endsWith(".zip")) return "application/zip";
+        if (lower.endsWith(".gz") || lower.endsWith(".gzip")) return "application/gzip";
+        if (lower.endsWith(".tar")) return "application/x-tar";
+        if (lower.endsWith(".7z")) return "application/x-7z-compressed";
+
+        // Media (Audio / Video)
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".wav")) return "audio/wav";
+        if (lower.endsWith(".ogg")) return "audio/ogg";
+
         return "application/octet-stream";
+    }
+
+    static boolean isBinaryFile(Path file, String mimeType) {
+        if (mimeType != null) {
+            if (mimeType.startsWith("image/") && !mimeType.equals("image/svg+xml")) return true;
+            if (mimeType.equals("application/pdf")) return true;
+            if (mimeType.startsWith("video/") || mimeType.startsWith("audio/")) return true;
+            if (mimeType.equals("application/zip") || mimeType.equals("application/gzip") ||
+                mimeType.equals("application/x-tar") || mimeType.equals("application/x-7z-compressed")) return true;
+            if (mimeType.equals("model/gltf-binary")) return true;
+            if (mimeType.startsWith("application/vnd.openxmlformats") || mimeType.startsWith("application/msword") ||
+                mimeType.startsWith("application/vnd.ms-")) return true;
+        }
+
+        // Sniff first 512 bytes for null byte (common signature of binary formats)
+        try {
+            if (file != null && Files.isRegularFile(file) && Files.size(file) > 0) {
+                try (InputStream is = Files.newInputStream(file)) {
+                    byte[] buf = new byte[512];
+                    int read = is.read(buf);
+                    for (int i = 0; i < read; i++) {
+                        if (buf[i] == 0) return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return false;
     }
 }

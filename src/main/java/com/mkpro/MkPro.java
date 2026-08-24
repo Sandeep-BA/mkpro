@@ -187,6 +187,7 @@ public class MkPro {
         registry.register(new SchedulerCommand());
         registry.register(new FactsCommand());
         registry.register(new JlamaCommand());
+        registry.register(new CaptureCommand());
         registry.register(new HelpCommand(registry));
         registry.register(new ExitCommand());
         // /quit is an alias for /exit
@@ -258,7 +259,7 @@ public class MkPro {
             }
             
             // Also print to terminal
-            originalOut.print(ANSI_CYAN + "[Web] " + text + ANSI_RESET + "\n");
+            originalOut.print(ANSI_CYAN + "[Web] " + ANSI_RESET + text + "\n");
             originalOut.print(output);
         } catch (Exception e) {
             if (context.getEventBus() != null) {
