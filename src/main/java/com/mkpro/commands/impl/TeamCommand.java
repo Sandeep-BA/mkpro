@@ -85,7 +85,7 @@ public class TeamCommand implements Command {
             
             // Also update the runner to use the new definitions
             context.setAgentConfigs(context.getCentralMemory().getAllAgentConfigs());
-            context.setRunner(context.getAgentManager().createRunner(context.getAgentConfigs(), ""));
+            context.setRunner(context.getAgentManager().createRunner(context.getAgentConfigs(), "", context.getMaxTurns()));
             
             System.out.println(ANSI_BRIGHT_GREEN + "Switched to team: " + teamName + ANSI_RESET);
         } else {

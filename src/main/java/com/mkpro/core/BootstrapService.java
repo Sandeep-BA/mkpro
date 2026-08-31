@@ -468,7 +468,7 @@ public class BootstrapService {
                 p2pBus.setOnConnectHook(peerHandshake::sendHello);
             }
 
-            Runner runner = am.createRunner(context.getAgentConfigs(), "");
+            Runner runner = am.createRunner(context.getAgentConfigs(), "", context.getMaxTurns());
             context.setRunner(runner);
 
             // Initialize Markov Router — auto-trains from datajsonl/ if available

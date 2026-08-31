@@ -143,7 +143,7 @@ public class ModelCommand implements Command {
             }
             
             // Recreate runner to apply changes
-            context.setRunner(context.getAgentManager().createRunner(context.getAgentConfigs(), ""));
+            context.setRunner(context.getAgentManager().createRunner(context.getAgentConfigs(), "", context.getMaxTurns()));
             
         } catch (IllegalArgumentException e) {
             System.out.println("Invalid provider: " + providerStr);

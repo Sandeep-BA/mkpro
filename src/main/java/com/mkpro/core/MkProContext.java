@@ -32,6 +32,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * MkProContext encapsulates the application state.
  */
 public class MkProContext {
+    private int maxTurns = -1;
+
+    public void setMaxTurns(int limit) {
+        this.maxTurns = limit;
+    }
+
+    public int getMaxTurns() {
+        return this.maxTurns;
+    }
     private Runner runner;
     private Session currentSession;
     private BaseSessionService sessionService;
@@ -180,7 +189,7 @@ public class MkProContext {
             );
 
             // 4. Instantiate a new active runner
-            Runner newRunner = this.agentManager.createRunner(this.agentConfigs, "");
+            Runner newRunner = this.agentManager.createRunner(this.agentConfigs, "", this.maxTurns);
             if (newRunner == null) {
                 this.runner = null;
                 this.currentSession = null;

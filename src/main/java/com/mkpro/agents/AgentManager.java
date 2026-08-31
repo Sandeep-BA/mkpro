@@ -15,6 +15,7 @@ import com.google.adk.models.SarvamBaseLM;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.runner.Runner;
 import com.google.adk.runner.MapDbRunner;
+import com.google.adk.plugins.ContextFilterPlugin;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.Session;
 import com.google.adk.sessions.SessionKey;
@@ -262,7 +263,7 @@ public class AgentManager {
         return ollamaServerUrl;
     }
 
-    public Runner createRunner(Map<String, AgentConfig> agentConfigs, String augmentedContext) {
+    public Runner createRunner(Map<String, AgentConfig> agentConfigs, String augmentedContext, int maxTurns) {
         this.activeAgentConfigs = agentConfigs;
         try {
             // Automatically detect project context if not already provided or if augmentedContext is empty
@@ -576,6 +577,10 @@ public class AgentManager {
                     .sessionService(sessionService)
                     .artifactService(artifactService)
                     .memoryService(memoryService);
+
+            if (maxTurns > 0) {
+                agentBuilder.plugins(java.util.Collections.singletonList(ContextFilterPlugin.builder().numInvocationsToKeep(maxTurns).build()));
+            }
 
             logger.log("INFO", "Creating runner for type: " + runnerType);
             
