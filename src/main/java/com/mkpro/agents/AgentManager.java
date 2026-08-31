@@ -41,6 +41,8 @@ import com.mkpro.ActionLogger;
 import com.mkpro.CentralMemory;
 import com.google.adk.memory.EmbeddingService;
 import com.google.adk.memory.MapDBVectorStore;
+import com.mkpro.plugins.FilterConfig;
+import com.mkpro.plugins.SmartEventFilterPlugin;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -264,6 +266,11 @@ public class AgentManager {
     }
 
     public Runner createRunner(Map<String, AgentConfig> agentConfigs, String augmentedContext, int maxTurns) {
+        FilterConfig filterConfig = FilterConfig.builder().maxTurns(maxTurns).build();
+        return createRunner(agentConfigs, augmentedContext, filterConfig);
+    }
+
+    public Runner createRunner(Map<String, AgentConfig> agentConfigs, String augmentedContext, FilterConfig filterConfig) {
         this.activeAgentConfigs = agentConfigs;
         try {
             // Automatically detect project context if not already provided or if augmentedContext is empty
@@ -578,8 +585,8 @@ public class AgentManager {
                     .artifactService(artifactService)
                     .memoryService(memoryService);
 
-            if (maxTurns > 0) {
-                agentBuilder.plugins(java.util.Collections.singletonList(ContextFilterPlugin.builder().numInvocationsToKeep(maxTurns).build()));
+            if (filterConfig != null) {
+                agentBuilder.plugins(java.util.Collections.singletonList(new SmartEventFilterPlugin(filterConfig)));
             }
 
             logger.log("INFO", "Creating runner for type: " + runnerType);

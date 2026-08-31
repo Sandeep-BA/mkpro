@@ -18,6 +18,7 @@ import com.google.adk.memory.EmbeddingService;
 import com.google.adk.memory.VectorStore;
 import com.google.adk.memory.MapDBVectorStore;
 import com.mkpro.agents.AgentManager;
+import com.mkpro.plugins.FilterConfig;
 import org.jline.terminal.Terminal;
 import org.jline.reader.LineReader;
 
@@ -33,13 +34,28 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class MkProContext {
     private int maxTurns = -1;
+    private FilterConfig filterConfig = new FilterConfig();
 
     public void setMaxTurns(int limit) {
         this.maxTurns = limit;
+        if (this.filterConfig != null) {
+            this.filterConfig.setMaxTurns(limit);
+        }
     }
 
     public int getMaxTurns() {
         return this.maxTurns;
+    }
+
+    public FilterConfig getFilterConfig() {
+        return filterConfig;
+    }
+
+    public void setFilterConfig(FilterConfig filterConfig) {
+        this.filterConfig = filterConfig;
+        if (filterConfig != null) {
+            this.maxTurns = filterConfig.getMaxTurns();
+        }
     }
     private Runner runner;
     private Session currentSession;
@@ -189,7 +205,7 @@ public class MkProContext {
             );
 
             // 4. Instantiate a new active runner
-            Runner newRunner = this.agentManager.createRunner(this.agentConfigs, "", this.maxTurns);
+            Runner newRunner = this.agentManager.createRunner(this.agentConfigs, "", this.filterConfig);
             if (newRunner == null) {
                 this.runner = null;
                 this.currentSession = null;
