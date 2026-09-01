@@ -880,9 +880,9 @@
             <span class="user-icon">👤</span>
             <span id="usernameText">...</span>
         </div>
-        <button class="ssh-header-btn" id="sshHeaderBtn" onclick="openSshModal()" title="Remote SSH Credentials & Connections">
+        <button class="ssh-header-btn" id="sshHeaderBtn" onclick="openSshModal()" title="Sandbox Environment (Remote Ubuntu)">
             <span class="ssh-status-dot disconnected" id="sshStatusDot"></span>
-            <span>🔌 Remote SSH</span>
+            <span>📦 Sandbox</span>
         </button>
         <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
         <span class="status disconnected" id="status">● Disconnected</span>
@@ -2364,7 +2364,7 @@
             }
             const headerBtn = document.getElementById('sshHeaderBtn');
             if (headerBtn) {
-                headerBtn.title = connected ? 'Remote SSH: Connected' : 'Remote SSH: Disconnected (Click to Connect)';
+                headerBtn.title = connected ? 'Sandbox: Connected' : 'Sandbox: Disconnected (Click to Connect)';
             }
         }
 
@@ -2384,11 +2384,14 @@
 
     </script>
 
-    <!-- Remote SSH Connection Modal -->
+    <!-- Sandbox Connection Modal -->
     <div class="ssh-modal-overlay" id="sshModalOverlay" onclick="if(event.target===this) closeSshModal()">
         <div class="ssh-modal-card">
             <div class="ssh-modal-header">
-                <h3><span>🔌 Remote SSH Connection</span></h3>
+                <div>
+                    <h3 style="margin:0; font-size:14px; font-weight:600; display:flex; align-items:center; gap:6px;"><span>📦 Sandbox Environment (Remote Ubuntu)</span></h3>
+                    <p style="margin: 3px 0 0 0; font-size: 11px; color: var(--text-dim);">Connect to a remote sandboxed machine to run commands and execute code safely.</p>
+                </div>
                 <button class="ssh-modal-close-btn" onclick="closeSshModal()" title="Close (Esc)">✕</button>
             </div>
             <div class="ssh-modal-body">
@@ -2396,7 +2399,7 @@
 
                 <div id="sshActiveSessionsArea" style="display:none;" class="ssh-active-sessions">
                     <div class="ssh-active-header">
-                        <span>Active SSH Sessions</span>
+                        <span>Active Sandbox Sessions</span>
                         <button onclick="checkSshStatus()" style="background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px;">🔄 Refresh</button>
                     </div>
                     <div id="sshActiveSessionsList"></div>
@@ -2436,7 +2439,7 @@
                 <!-- Password Auth Row -->
                 <div class="ssh-form-row" id="sshRowPassword">
                     <label class="ssh-form-label" for="sshModalPassword">Password <span class="req">*</span></label>
-                    <input type="password" id="sshModalPassword" class="ssh-form-input" placeholder="Enter remote SSH password" autocomplete="new-password" spellcheck="false" />
+                    <input type="password" id="sshModalPassword" class="ssh-form-input" placeholder="Enter remote Sandbox password" autocomplete="new-password" spellcheck="false" />
                 </div>
 
                 <!-- Key File Path Row -->
