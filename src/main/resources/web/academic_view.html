@@ -4327,7 +4327,7 @@
             const port = parseInt(document.getElementById('sshModalPort').value.trim(), 10) || 22;
             const username = document.getElementById('sshModalUser').value.trim();
             const authType = document.getElementById('sshModalAuthType').value;
-            const alias = document.getElementById('sshModalAlias').value.trim() || 'default';
+            const sessionAlias = document.getElementById('sshModalAlias').value.trim() || 'default';
 
             const passwordInput = document.getElementById('sshModalPassword');
             const keyPathInput = document.getElementById('sshModalKeyPath');
@@ -4372,7 +4372,7 @@
                 port: port,
                 username: username,
                 authType: authType,
-                sessionAlias: alias
+                sessionAlias: sessionAlias
             };
 
             if (authType === 'PASSWORD') payload.password = password;
@@ -4386,19 +4386,30 @@
             }
 
             try {
-                const resp = await fetch('/api/ssh/connect', {
+                console.log('[Sandbox UI] Initiating connection payload:', { host, port, username, authType, sessionAlias });
+                const res = await fetch('/api/ssh/connect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+                console.log('[Sandbox UI] Response status:', res.status, res.statusText);
+                const rawText = await res.text();
+                console.log('[Sandbox UI] Raw response body:', rawText);
+                let data;
+                try {
+                    data = rawText ? JSON.parse(rawText) : {};
+                } catch (err) {
+                    console.error('[Sandbox UI] JSON parse failed on text:', rawText, err);
+                    throw new Error(`Server returned status ${res.status} with non-JSON body: ${rawText.substring(0, 200)}`);
+                }
+                console.log('[Sandbox UI] Parsed response data:', data);
 
                 // Clear secrets from memory immediately
                 clearSshSecrets();
 
-                const data = await resp.json();
-                if (resp.ok && data.status === 'connected') {
-                    showSshBanner('success', `✓ Successfully connected to <strong>${escapeHtml(data.username)}@${escapeHtml(data.host)}:${data.port}</strong> (alias: <code>${escapeHtml(data.alias)}</code>)`);
-                    saveSshConfigNonSensitive(host, port, username, authType, alias, keyPath);
+                if (res.ok && data.status === 'connected') {
+                    showSshBanner('success', `✓ Successfully connected to <strong>${escapeHtml(data.username)}@${escapeHtml(data.host)}:${data.port}</strong> (alias: <code>${escapeHtml(data.alias || sessionAlias)}</code>)`);
+                    saveSshConfigNonSensitive(host, port, username, authType, sessionAlias, keyPath);
                     updateSshStatusIndicator(true);
                     checkSshStatus();
                 } else {
@@ -4406,6 +4417,7 @@
                 }
             } catch (err) {
                 clearSshSecrets();
+                console.error('[Sandbox UI] Connection Exception:', err);
                 showSshBanner('error', `✕ Connection Error: ${escapeHtml(err.message)}`);
             } finally {
                 if (connectBtn) {
@@ -4414,6 +4426,7 @@
                 }
             }
         }
+        const submitSshConnect = connectSsh;
 
         async function disconnectSsh(alias) {
             const effectiveAlias = alias || document.getElementById('sshModalAlias').value.trim() || 'default';
@@ -4424,12 +4437,24 @@
             }
 
             try {
-                const resp = await fetch('/api/ssh/disconnect', {
+                console.log('[Sandbox UI] Disconnecting session alias:', effectiveAlias);
+                const res = await fetch('/api/ssh/disconnect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ alias: effectiveAlias })
                 });
-                const data = await resp.json();
+                console.log('[Sandbox UI] Disconnect response status:', res.status, res.statusText);
+                const rawText = await res.text();
+                console.log('[Sandbox UI] Disconnect raw body:', rawText);
+                let data;
+                try {
+                    data = rawText ? JSON.parse(rawText) : {};
+                } catch (err) {
+                    console.error('[Sandbox UI] Disconnect JSON parse failed:', rawText, err);
+                    throw new Error(`Server returned status ${res.status} with non-JSON body: ${rawText.substring(0, 200)}`);
+                }
+                console.log('[Sandbox UI] Disconnect parsed data:', data);
+
                 if (data.status === 'disconnected') {
                     showSshBanner('info', `Session <code>${escapeHtml(effectiveAlias)}</code> disconnected.`);
                 } else {
@@ -4437,6 +4462,7 @@
                 }
                 checkSshStatus();
             } catch (err) {
+                console.error('[Sandbox UI] Disconnect Exception:', err);
                 showSshBanner('error', `Disconnect error: ${escapeHtml(err.message)}`);
             } finally {
                 if (disconnectBtn) {
@@ -4448,9 +4474,22 @@
 
         async function checkSshStatus() {
             try {
-                const resp = await fetch('/api/ssh/status');
-                if (!resp.ok) return;
-                const data = await resp.json();
+                console.log('[Sandbox UI] Checking SSH status via /api/ssh/status');
+                const res = await fetch('/api/ssh/status');
+                console.log('[Sandbox UI] Status response status:', res.status, res.statusText);
+                const rawText = await res.text();
+                let data;
+                try {
+                    data = rawText ? JSON.parse(rawText) : {};
+                } catch (err) {
+                    console.error('[Sandbox UI] Status JSON parse failed:', rawText, err);
+                    updateSshStatusIndicator(false);
+                    return;
+                }
+                if (!res.ok) {
+                    updateSshStatusIndicator(false);
+                    return;
+                }
                 const isConnected = !!data.connected;
                 updateSshStatusIndicator(isConnected);
 
@@ -4478,9 +4517,11 @@
                     if (disconnectBtn) disconnectBtn.style.display = 'none';
                 }
             } catch (e) {
+                console.error('[Sandbox UI] checkSshStatus error:', e);
                 updateSshStatusIndicator(false);
             }
         }
+        const fetchSshStatus = checkSshStatus;
 
         function updateSshStatusIndicator(connected) {
             const dot = document.getElementById('sshStatusDot') || document.getElementById('sshHeaderDot');

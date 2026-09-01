@@ -95,6 +95,12 @@ class RestApiHandler {
                 handleGoalsApi(exchange); return true;
             case "/api/sessions/new":
                 handleNewSessionApi(exchange); return true;
+            case "/api/ssh/connect":
+                handleSshConnectApi(exchange); return true;
+            case "/api/ssh/disconnect":
+                handleSshDisconnectApi(exchange); return true;
+            case "/api/ssh/status":
+                handleSshStatusApi(exchange); return true;
             default:
                 // Prefix-based routes
                 if (path.startsWith("/api/knowledge/search")) {
@@ -802,6 +808,141 @@ class RestApiHandler {
             pendingBranchSwitch = null;
         } catch (Exception e) {
             try { sendJsonError(exchange, 500, e.getMessage()); } catch (Exception ignored) {}
+        }
+    }
+
+    // ========================================================================
+    // SSH / Sandbox API Handlers
+    // ========================================================================
+
+    /**
+     * POST /api/ssh/connect — Connect to a remote SSH/Sandbox host.
+     */
+    private void handleSshConnectApi(HttpExchange exchange) throws IOException {
+        System.out.println("[RestApiHandler] >>> Incoming request: " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
+        System.out.println("[RestApiHandler] Headers: " + exchange.getRequestHeaders().entrySet());
+
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            exchange.close();
+            return;
+        }
+
+        try {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            System.out.println("[RestApiHandler] Body: " + (body.length() > 500 ? body.substring(0, 500) + "..." : body));
+
+            JsonNode req = mapper.readTree(body);
+            String host = req.has("host") ? req.get("host").asText().trim() : "";
+            int port = req.has("port") ? req.get("port").asInt(22) : 22;
+            String username = req.has("username") ? req.get("username").asText().trim() : "";
+            String authTypeStr = req.has("authType") ? req.get("authType").asText() : "PASSWORD";
+            String sessionAlias = req.has("sessionAlias") ? req.get("sessionAlias").asText().trim() : (req.has("alias") ? req.get("alias").asText().trim() : "default");
+
+            String password = req.has("password") ? req.get("password").asText() : null;
+            String privateKeyPath = req.has("privateKeyPath") ? req.get("privateKeyPath").asText().trim() : null;
+            String privateKeyContent = req.has("privateKeyContent") ? req.get("privateKeyContent").asText() : null;
+            String passphrase = req.has("passphrase") ? req.get("passphrase").asText() : null;
+
+            if (host.isEmpty() || username.isEmpty()) {
+                Map<String, Object> errResponse = Map.of("error", "host and username are required");
+                System.out.println("[RestApiHandler] <<< Response 400: " + mapper.writeValueAsString(errResponse));
+                sendJsonResponse(exchange, 400, errResponse);
+                return;
+            }
+
+            com.mkpro.infra.ssh.AuthType authType = com.mkpro.infra.ssh.AuthType.fromString(authTypeStr);
+            com.mkpro.infra.ssh.SshSessionManager mgr = com.mkpro.infra.ssh.SshSessionManager.getInstance();
+            var entry = mgr.connect(host, port, username, password, privateKeyPath, privateKeyContent, passphrase, authType, sessionAlias);
+
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("status", "connected");
+            resp.put("alias", entry.getAlias());
+            resp.put("host", entry.getHost());
+            resp.put("port", entry.getPort());
+            resp.put("username", entry.getUsername());
+
+            String respJson = mapper.writeValueAsString(resp);
+            System.out.println("[RestApiHandler] <<< Response 200: " + respJson);
+            sendJsonResponse(exchange, 200, resp);
+
+        } catch (Exception e) {
+            System.out.println("[RestApiHandler] <<< Response 500 (Exception): " + e.getMessage());
+            sendJsonResponse(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+    }
+
+    /**
+     * POST /api/ssh/disconnect — Disconnect an active SSH session by alias.
+     */
+    private void handleSshDisconnectApi(HttpExchange exchange) throws IOException {
+        System.out.println("[RestApiHandler] >>> Incoming request: " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
+        System.out.println("[RestApiHandler] Headers: " + exchange.getRequestHeaders().entrySet());
+
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            exchange.close();
+            return;
+        }
+
+        try {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            System.out.println("[RestApiHandler] Body: " + body);
+
+            JsonNode req = mapper.readTree(body);
+            String alias = req.has("alias") ? req.get("alias").asText().trim() : (req.has("sessionAlias") ? req.get("sessionAlias").asText().trim() : "default");
+
+            com.mkpro.infra.ssh.SshSessionManager mgr = com.mkpro.infra.ssh.SshSessionManager.getInstance();
+            boolean disconnected = mgr.disconnect(alias);
+
+            Map<String, Object> resp = Map.of(
+                "status", disconnected ? "disconnected" : "not_found",
+                "alias", alias
+            );
+            String respJson = mapper.writeValueAsString(resp);
+            System.out.println("[RestApiHandler] <<< Response 200: " + respJson);
+            sendJsonResponse(exchange, 200, resp);
+        } catch (Exception e) {
+            System.out.println("[RestApiHandler] <<< Response 500 (Exception): " + e.getMessage());
+            sendJsonResponse(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+    }
+
+    /**
+     * GET /api/ssh/status — Check active SSH sessions status.
+     */
+    private void handleSshStatusApi(HttpExchange exchange) throws IOException {
+        System.out.println("[RestApiHandler] >>> Incoming request: " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
+        System.out.println("[RestApiHandler] Headers: " + exchange.getRequestHeaders().entrySet());
+
+        try {
+            com.mkpro.infra.ssh.SshSessionManager mgr = com.mkpro.infra.ssh.SshSessionManager.getInstance();
+            var sessions = mgr.listSessions();
+
+            List<Map<String, Object>> sessionList = new ArrayList<>();
+            for (var s : sessions) {
+                if (s.isConnected()) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("alias", s.getAlias());
+                    item.put("host", s.getHost());
+                    item.put("port", s.getPort());
+                    item.put("username", s.getUsername());
+                    item.put("connectedAt", s.getConnectedAt().toString());
+                    sessionList.add(item);
+                }
+            }
+
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("connected", !sessionList.isEmpty());
+            resp.put("sessionCount", sessionList.size());
+            resp.put("sessions", sessionList);
+
+            String respJson = mapper.writeValueAsString(resp);
+            System.out.println("[RestApiHandler] <<< Response 200: " + respJson);
+            sendJsonResponse(exchange, 200, resp);
+        } catch (Exception e) {
+            System.out.println("[RestApiHandler] <<< Response 500 (Exception): " + e.getMessage());
+            sendJsonResponse(exchange, 500, Map.of("error", e.getMessage() != null ? e.getMessage() : e.toString()));
         }
     }
 
