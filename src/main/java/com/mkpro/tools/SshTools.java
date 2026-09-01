@@ -32,7 +32,7 @@ public class SshTools {
     public static BaseTool createConnectTool() {
         return new BaseTool(
             "ssh_connect",
-            "Connects to a remote Linux/Ubuntu host via SSH. Supports password authentication, " +
+            "Connects to a remote Linux/Ubuntu host, sandbox, or server via SSH. Supports password authentication, " +
             "private key file path, or inline private key content. Establishes a persistent session alias " +
             "used for subsequent command executions and file transfers."
         ) {
@@ -52,7 +52,8 @@ public class SshTools {
                             .put("privateKeyContent", Schema.builder().type("STRING").description("Raw PEM/OpenSSH private key content string.").build())
                             .put("passphrase", Schema.builder().type("STRING").description("Passphrase for encrypted private key (if any).").build())
                             .put("authType", Schema.builder().type("STRING").description("Auth type: 'PASSWORD', 'KEY_FILE', 'KEY_CONTENT' (default auto-detected).").build())
-                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias/identifier (default: 'default').").build())
+                            .put("alias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
+                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
                             .build())
                         .required(ImmutableList.of("host", "username"))
                         .build())
@@ -80,6 +81,9 @@ public class SshTools {
                     String passphrase = (String) args.get("passphrase");
                     String authTypeStr = (String) args.get("authType");
                     String sessionAlias = (String) args.get("sessionAlias");
+                    if (sessionAlias == null || sessionAlias.isBlank()) {
+                        sessionAlias = (String) args.get("alias");
+                    }
                     if (sessionAlias == null || sessionAlias.isBlank()) {
                         sessionAlias = "default";
                     }
@@ -122,9 +126,10 @@ public class SshTools {
     public static BaseTool createExecTool() {
         return new BaseTool(
             "ssh_exec",
-            "Executes a bash/shell command on an active remote SSH session. Returns exit status, " +
-            "standard output (stdout), and error output (stderr). Recommended for Ubuntu administrative commands, " +
-            "diagnostics, log reading, systemctl service management, and deployment scripts."
+            "Executes a bash/shell command on an active remote SSH session (remote machine, sandbox, ubuntu, or remote server). " +
+            "When user prompts mention running commands on a remote machine, sandbox, ubuntu, or remote server, invoke this tool. " +
+            "Returns exit status code, standard output (stdout), and error output (stderr). " +
+            "Recommended for Ubuntu administrative commands, diagnostics, log reading, systemctl service management, and remote workflows."
         ) {
             @Override
             public Optional<FunctionDeclaration> declaration() {
@@ -134,9 +139,10 @@ public class SshTools {
                     .parameters(Schema.builder()
                         .type("OBJECT")
                         .properties(ImmutableMap.<String, Schema>builder()
-                            .put("command", Schema.builder().type("STRING").description("The shell/bash command to run on remote Ubuntu host.").build())
+                            .put("command", Schema.builder().type("STRING").description("The shell/bash command to run on remote Ubuntu host, sandbox, or server.").build())
+                            .put("alias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
+                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
                             .put("timeoutSeconds", Schema.builder().type("INTEGER").description("Execution timeout in seconds (default: 30).").build())
-                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias (default: 'default').").build())
                             .build())
                         .required(ImmutableList.of("command"))
                         .build())
@@ -148,6 +154,9 @@ public class SshTools {
                 return Single.fromCallable(() -> {
                     String command = (String) args.get("command");
                     String sessionAlias = (String) args.get("sessionAlias");
+                    if (sessionAlias == null || sessionAlias.isBlank()) {
+                        sessionAlias = (String) args.get("alias");
+                    }
                     if (sessionAlias == null || sessionAlias.isBlank()) {
                         sessionAlias = "default";
                     }
@@ -195,7 +204,7 @@ public class SshTools {
     public static BaseTool createFileTransferTool() {
         return new BaseTool(
             "ssh_file_transfer",
-            "Transfers files between the local system and the remote server using SFTP. " +
+            "Transfers files between the local system and the remote server or sandbox using SFTP. " +
             "Supports action 'upload' (local to remote) and 'download' (remote to local)."
         ) {
             @Override
@@ -208,8 +217,9 @@ public class SshTools {
                         .properties(ImmutableMap.<String, Schema>builder()
                             .put("action", Schema.builder().type("STRING").description("Action: 'upload' (local->remote) or 'download' (remote->local).").build())
                             .put("localPath", Schema.builder().type("STRING").description("Path on the local file system.").build())
-                            .put("remotePath", Schema.builder().type("STRING").description("Path on the remote Ubuntu server.").build())
-                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias (default: 'default').").build())
+                            .put("remotePath", Schema.builder().type("STRING").description("Path on the remote Ubuntu server or sandbox.").build())
+                            .put("alias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
+                            .put("sessionAlias", Schema.builder().type("STRING").description("Session alias/identifier (optional, default: 'default').").build())
                             .build())
                         .required(ImmutableList.of("action", "localPath", "remotePath"))
                         .build())
@@ -223,6 +233,9 @@ public class SshTools {
                     String localPath = (String) args.get("localPath");
                     String remotePath = (String) args.get("remotePath");
                     String sessionAlias = (String) args.get("sessionAlias");
+                    if (sessionAlias == null || sessionAlias.isBlank()) {
+                        sessionAlias = (String) args.get("alias");
+                    }
                     if (sessionAlias == null || sessionAlias.isBlank()) {
                         sessionAlias = "default";
                     }
@@ -257,7 +270,7 @@ public class SshTools {
     public static BaseTool createDisconnectTool() {
         return new BaseTool(
             "ssh_disconnect",
-            "Closes and terminates an active SSH session by session alias."
+            "Closes and terminates an active SSH session by session alias (default: 'default')."
         ) {
             @Override
             public Optional<FunctionDeclaration> declaration() {
@@ -267,7 +280,8 @@ public class SshTools {
                     .parameters(Schema.builder()
                         .type("OBJECT")
                         .properties(ImmutableMap.of(
-                            "sessionAlias", Schema.builder().type("STRING").description("Session alias to disconnect (default: 'default').").build()
+                            "alias", Schema.builder().type("STRING").description("Session alias to disconnect (optional, default: 'default').").build(),
+                            "sessionAlias", Schema.builder().type("STRING").description("Session alias to disconnect (optional, default: 'default').").build()
                         ))
                         .build())
                     .build());
@@ -277,6 +291,9 @@ public class SshTools {
             public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext toolContext) {
                 return Single.fromCallable(() -> {
                     String sessionAlias = (String) args.get("sessionAlias");
+                    if (sessionAlias == null || sessionAlias.isBlank()) {
+                        sessionAlias = (String) args.get("alias");
+                    }
                     if (sessionAlias == null || sessionAlias.isBlank()) {
                         sessionAlias = "default";
                     }

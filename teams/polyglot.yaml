@@ -13,6 +13,7 @@ agents:
       - ReactCoder: For building React components, UI elements, and frontend logic.
       - GoCoder: For writing, refactoring, or debugging Golang specific code.
       - SysAdmin: For shell scripts, server management, or system-level tasks (DO NOT use for Git operations).
+      - UbuntuOps: For remote Ubuntu/Linux server administration, diagnostics, sandbox operations, SSH command execution, and SFTP transfers.
       - Tester: For writing unit tests, running QA suites, and verifying code logic.
       - GitAgent: For managing version control, staging files, creating semantic commits, and pushing code to the repository.
       
@@ -21,6 +22,9 @@ agents:
       - Delegate to the specific expert (e.g., `ask_java_coder` for Java, `ask_python_coder` for Python).
       - Do not try to write files or run commands yourself.
       - Always prefer concise answers.
+      - **REMOTE EXECUTION & SANDBOX:** When the user asks to inspect, run, diagnose, or manage the remote/sandbox Ubuntu machine, remote server, or run commands on the connected machine:
+        - You CAN execute directly using `ssh_exec` (or inspect sessions with `ssh_status` / connect with `ssh_connect`), using the active session alias ("default" if omitted).
+        - OR delegate to UbuntuOps (`ask_ubuntu_ops`) or SysAdmin (`ask_sys_admin`).
 
   - name: GoalTracker
     description: "Delegates project goal and task tracking to the Goal Tracker agent."
@@ -110,3 +114,15 @@ agents:
       AI Resource Usage (Session [sessionId]):
       [Token breakdown output from get_session_stats]
     model: "llama3"
+
+
+  - name: UbuntuOps
+    description: "Delegates remote Ubuntu/Linux administration, diagnostics, sandbox operations, SSH command execution, and SFTP transfers to the UbuntuOps agent."
+    tools: [ssh, file_read, file_write, safe_write, shell, clipboard, codebase_search, central_memory, fetch_url]
+    routing_keywords: [ssh, remote, remote server, sandbox, remote machine, ubuntu, vps, ec2, sftp, bash remote]
+    fallback_model: gemini-3.1-flash-lite@GEMINI
+    instruction: |
+      Role: Remote Ubuntu Systems Administrator & DevOps Specialist.
+      Responsibilities:
+      - Execute remote bash/shell commands on connected SSH sessions using `ssh_exec`.
+      - Transfer files and manage remote operations.

@@ -189,6 +189,8 @@ public class MkPro {
         registry.register(new JlamaCommand());
         registry.register(new CaptureCommand());
         registry.register(new CompactCommand());
+        registry.register(new SshCommand());
+        registry.register(new ExecCommand());
         registry.register(new HelpCommand(registry));
         registry.register(new ExitCommand());
         // /quit is an alias for /exit
@@ -271,10 +273,6 @@ public class MkPro {
         }
     }
 
-    /**
-     * Parse --web [port] from command line args.
-     * Returns port number if --web is present (default 8080), or -1 if not.
-     */
     /**
      * Restore user preferences from previous session (web, scheduler).
      * Only activates if not already started via command-line flags.

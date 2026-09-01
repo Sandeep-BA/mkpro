@@ -111,6 +111,7 @@
     <jocl.version>2.0.4</jocl.version>
     <jline.version>3.26.3</jline.version>
     <mapdb.version>3.1.0</mapdb.version>
+    <jsch.version>0.2.16</jsch.version>
     <maven.compiler.target>21</maven.compiler.target>
     <selenium.version>4.21.0</selenium.version>
     <slf4j.version>2.0.12</slf4j.version>

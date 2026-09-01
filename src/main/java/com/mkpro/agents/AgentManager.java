@@ -453,6 +453,8 @@ public class AgentManager {
             coordinatorTools.add(FetchUrlTools.create());
             coordinatorTools.add(CentralMemoryTools.commitToMemory());
             coordinatorTools.add(CentralMemoryTools.recallProjectMemory());
+            // Direct SSH tool suite for Coordinator (enables seamless remote command execution)
+            coordinatorTools.addAll(sshTools);
             // Peer agent communication — Coordinator can directly ask other instances
             coordinatorTools.addAll(toolRegistry.get("ask_peer_agent"));
             coordinatorTools.addAll(toolRegistry.get("list_peers"));
@@ -549,7 +551,7 @@ public class AgentManager {
                     .description("The main orchestrator agent.")
                     .instruction(coordInstruction)
                     .model(coordLlm)
-                    .tools(coordinatorTools) // Expose delegation tools
+                    .tools(coordinatorTools) // Expose delegation tools + SSH tools
                     .planning(true) // ENABLE PLANNING LOOP
                     .build();
             agents.add(coordinator);

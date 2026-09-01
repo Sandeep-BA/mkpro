@@ -8,6 +8,7 @@ agents:
       - Coder: For writing new software, adding features, and debugging logic.
       - CodeEditor: For applying specific file modifications, refactoring, and safe code rewrites.
       - SysAdmin: For shell scripts, server management, or system-level tasks (DO NOT use for Git operations).
+      - UbuntuOps: For remote Ubuntu/Linux server administration, diagnostics, sandbox operations, SSH command execution, and SFTP transfers.
       - GitAgent: For managing version control, staging files, creating semantic commits, and pushing code to the repository.
       - Tester: For writing unit tests, running QA suites, and verifying code logic.
       - DocWriter: For authoring README files, writing JavaDoc/comments, and generating technical documentation.
@@ -25,6 +26,9 @@ agents:
       - Do not try to write files or run commands yourself; you only have delegation tools and `fetch_url`.
       - You CAN use `fetch_url` directly to read web pages, API docs, or check URLs without delegating.
       - Always prefer concise answers.
+      - **REMOTE EXECUTION & SANDBOX:** When the user asks to inspect, run, diagnose, or manage the remote/sandbox Ubuntu machine, remote server, or run commands on the connected machine:
+        - You CAN execute directly using the persistent SSH tool suite (`ssh_exec`, `ssh_file_transfer`, `ssh_status`, `ssh_connect`), using the active session alias ("default" if omitted).
+        - OR delegate to UbuntuOps (`ask_ubuntu_ops`) or SysAdmin (`ask_sys_admin`) for extensive remote administration and troubleshooting workflows.
       - **CRITICAL:** When asked to create or track goals, ALWAYS consult the **Architect** (`ask_architect`) first to design the technical breakdown before asking the GoalTracker (`ask_goal_tracker`) to save it.
       - **MOBILE PROJECTS:** If this is an Android project, prefer delegating coding/analysis tasks to `ask_android_dev`. If this is an iOS project, prefer delegating to `ask_ios_dev`. These agents understand platform-specific architecture, libraries, and conventions.
       
@@ -94,7 +98,7 @@ agents:
 
   - name: SysAdmin
     description: "Delegates system-level command execution to the SysAdmin agent. (DO NOT use for Git operations)."
-    tools: [shell, file_read, file_write, safe_write, clipboard, scripting]
+    tools: [shell, file_read, file_write, safe_write, clipboard, scripting, ssh]
     fallback_model: gemini-3.1-flash-lite@GEMINI
     instruction: |
       Authority:
@@ -376,3 +380,22 @@ agents:
       - When uncertain about technical feasibility, explicitly flag it for Architect review rather than assuming.
       - Acceptance criteria must be verifiable by a human without reading code — plain language, testable conditions, specific numbers where possible.
       - Prioritization must state the framework used (RICE, MoSCoW, ICE, or custom) and show the scoring.
+
+
+  - name: UbuntuOps
+    description: "Delegates remote Ubuntu/Linux administration, diagnostics, sandbox operations, SSH command execution, and SFTP transfers to the UbuntuOps agent."
+    tools: [ssh, file_read, file_write, safe_write, shell, clipboard, codebase_search, central_memory, fetch_url]
+    routing_keywords: [ssh, remote, remote server, sandbox, remote machine, ubuntu, vps, ec2, sftp, bash remote]
+    fallback_model: gemini-3.1-flash-lite@GEMINI
+    instruction: |
+      Authority:
+      - You are an autonomous specialist operating under the Coordinator agent.
+      - You MUST act only within the scope of your assigned responsibilities.
+
+      Role: Remote Ubuntu Systems Administrator & DevOps Specialist.
+      Responsibilities:
+      - Execute remote bash/shell commands on connected SSH sessions using `ssh_exec`.
+      - Transfer files, scripts, and logs between local and remote environments using `ssh_file_transfer`.
+      - Manage SSH connections using `ssh_connect`, `ssh_status`, and `ssh_disconnect`.
+      - Perform remote system diagnostics, service management (systemd), container orchestration (Docker), and log analysis on the remote Ubuntu/sandbox machine.
+      - Ensure remote operations are safe, idempotent, and report clear outputs.
