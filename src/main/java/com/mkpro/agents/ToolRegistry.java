@@ -14,7 +14,8 @@ import java.util.*;
  * Supported tool names:
  *   file_read, file_write, safe_write, clipboard, shell, image,
  *   codebase_search, multi_project_search, mcp_scan, graph_memory,
- *   fetch_url, stats, selenium
+ *   fetch_url, stats, selenium, ssh, ssh_connect, ssh_exec,
+ *   ssh_file_transfer, ssh_disconnect, ssh_status
  */
 public class ToolRegistry {
 
@@ -99,6 +100,15 @@ public class ToolRegistry {
         toolCache.put("verify_fact", List.of(
             com.mkpro.facts.VerifyFactTool.create()
         ));
+
+        // Persistent SSH tool suite & individual tools
+        toolCache.put("ssh", SshTools.createSuite());
+        toolCache.put("ssh_tools", SshTools.createSuite());
+        toolCache.put("ssh_connect", List.of(SshTools.createConnectTool()));
+        toolCache.put("ssh_exec", List.of(SshTools.createExecTool()));
+        toolCache.put("ssh_file_transfer", List.of(SshTools.createFileTransferTool()));
+        toolCache.put("ssh_disconnect", List.of(SshTools.createDisconnectTool()));
+        toolCache.put("ssh_status", List.of(SshTools.createStatusTool()));
 
         // Selenium browser tools
         try {

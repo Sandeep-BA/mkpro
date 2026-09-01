@@ -338,6 +338,9 @@ public class AgentManager {
             List<BaseTool> fetchUrlTools = new ArrayList<>();
             fetchUrlTools.add(FetchUrlTools.create());
 
+            // Persistent SSH tools
+            List<BaseTool> sshTools = new ArrayList<>(SshTools.createSuite());
+
             // 2. Aggregate specialized arrays tailored to agent roles
             List<BaseTool> coderTools = new ArrayList<>();
             coderTools.add(FileSystemTools.create()); // read-only file access
@@ -358,6 +361,7 @@ public class AgentManager {
             sysAdminTools.addAll(shellTools);
             sysAdminTools.addAll(fileSystemTools);
             sysAdminTools.addAll(clipboardTools);
+            sysAdminTools.addAll(sshTools);
 
             List<BaseTool> gitTools = new ArrayList<>();
             gitTools.addAll(shellTools);
@@ -404,10 +408,21 @@ public class AgentManager {
             devOpsTools.addAll(fileSystemTools);
             devOpsTools.addAll(clipboardTools);
             devOpsTools.addAll(codebaseSearchTools);
+            devOpsTools.addAll(sshTools);
 
             List<BaseTool> goalTrackerTools = new ArrayList<>();
             goalTrackerTools.addAll(fileSystemTools);
             goalTrackerTools.addAll(clipboardTools);
+
+            List<BaseTool> ubuntuOpsTools = new ArrayList<>();
+            ubuntuOpsTools.addAll(sshTools);
+            ubuntuOpsTools.addAll(fileSystemTools);
+            ubuntuOpsTools.addAll(shellTools);
+            ubuntuOpsTools.addAll(clipboardTools);
+            ubuntuOpsTools.addAll(codebaseSearchTools);
+            ubuntuOpsTools.add(CentralMemoryTools.commitToMemory());
+            ubuntuOpsTools.add(CentralMemoryTools.recallProjectMemory());
+            ubuntuOpsTools.addAll(fetchUrlTools);
 
             // Create a mapping of agent name to its assigned toolset
             Map<String, List<BaseTool>> toolMap = new HashMap<>();
@@ -429,7 +444,7 @@ public class AgentManager {
                         coderTools, codeEditorTools, sysAdminTools, gitTools,
                         testerTools, architectTools, securityAuditorTools,
                         databaseAdminTools, dataAnalystTools, docWriterTools,
-                        devOpsTools, goalTrackerTools);
+                        devOpsTools, goalTrackerTools, ubuntuOpsTools);
                 }
                 toolMap.put(def.getName(), toolsForAgent);
             }
@@ -619,7 +634,8 @@ public class AgentManager {
             List<BaseTool> testerTools, List<BaseTool> architectTools,
             List<BaseTool> securityAuditorTools, List<BaseTool> databaseAdminTools,
             List<BaseTool> dataAnalystTools, List<BaseTool> docWriterTools,
-            List<BaseTool> devOpsTools, List<BaseTool> goalTrackerTools) {
+            List<BaseTool> devOpsTools, List<BaseTool> goalTrackerTools,
+            List<BaseTool> ubuntuOpsTools) {
 
         if (agentName == null) return coderTools;
         String nameLower = agentName.toLowerCase();
@@ -636,6 +652,10 @@ public class AgentManager {
             return dataAnalystTools;
         } else if (nameLower.equals("sysadmin") || nameLower.equals("sys_admin")) {
             return sysAdminTools;
+        } else if (nameLower.equals("ubuntuops") || nameLower.equals("ubuntu_ops") || nameLower.equals("ubuntu")
+                || nameLower.equals("remoteops") || nameLower.equals("remote_ops") || nameLower.equals("ops")
+                || nameLower.equals("sysadmin_ssh") || nameLower.equals("ubuntusysadmin")) {
+            return ubuntuOpsTools;
         } else if (nameLower.equals("devops") || nameLower.contains("sre")) {
             return devOpsTools;
         } else if (nameLower.contains("git") || nameLower.contains("release")) {

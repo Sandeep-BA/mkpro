@@ -30,6 +30,7 @@
              To update: rebuild ADK from source and mvn install. -->
         <adk.version>1.6.1-SNAPSHOT</adk.version>
         <rxjava.version>3.1.8</rxjava.version>
+        <jsch.version>0.2.16</jsch.version>
     </properties>
 
     <dependencyManagement>
@@ -53,7 +54,8 @@
                 <version>${junit.version}</version>
                 <scope>test</scope>
             </dependency>
-        </dependencies>
+
+    </dependencies>
     </dependencyManagement>
 
     <dependencies>
@@ -114,6 +116,13 @@
             <groupId>org.mapdb</groupId>
             <artifactId>mapdb</artifactId>
             <version>${mapdb.version}</version>
+        </dependency>
+
+        <!-- Modern SSH / JSch Fork -->
+        <dependency>
+            <groupId>com.github.mwiede</groupId>
+            <artifactId>jsch</artifactId>
+            <version>${jsch.version}</version>
         </dependency>
 
         <!-- Networking -->
