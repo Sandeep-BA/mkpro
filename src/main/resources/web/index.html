@@ -2091,21 +2091,60 @@
         // ========================================================================
         const SSH_CONFIG_KEY = 'mkpro-ssh-config';
 
-        function loadSshConfig() {
+        async function loadSshConfig() {
+            try {
+                // Fetch persistent server configuration from CentralMemory / MapDB
+                const res = await fetch('/api/ssh/config');
+                if (res.ok) {
+                    const cfg = await res.json();
+                    if (cfg.configured) {
+                        if (cfg.host && document.getElementById('sshModalHost')) document.getElementById('sshModalHost').value = cfg.host;
+                        if (cfg.port && document.getElementById('sshModalPort')) document.getElementById('sshModalPort').value = cfg.port;
+                        if (cfg.username && document.getElementById('sshModalUser')) document.getElementById('sshModalUser').value = cfg.username;
+                        if (cfg.alias && document.getElementById('sshModalAlias')) document.getElementById('sshModalAlias').value = cfg.alias;
+                        if (cfg.authType && document.getElementById('sshModalAuthType')) {
+                            document.getElementById('sshModalAuthType').value = cfg.authType;
+                            onSshAuthTypeChange();
+                        }
+                        if (cfg.privateKeyPath && document.getElementById('sshModalKeyPath')) {
+                            document.getElementById('sshModalKeyPath').value = cfg.privateKeyPath;
+                        }
+                        if (document.getElementById('sshModalAutoConnect')) {
+                            document.getElementById('sshModalAutoConnect').checked = !!cfg.autoConnect;
+                        }
+                        if (cfg.hasPassword && document.getElementById('sshModalPassword')) {
+                            document.getElementById('sshModalPassword').placeholder = '•••••••• (Saved password)';
+                        }
+                        if (cfg.hasPrivateKeyContent && document.getElementById('sshModalKeyContent')) {
+                            document.getElementById('sshModalKeyContent').placeholder = '[Using securely saved private key]';
+                        }
+                        if (cfg.hasPassphrase && document.getElementById('sshModalPassphrase')) {
+                            document.getElementById('sshModalPassphrase').placeholder = '•••••••• (Saved passphrase)';
+                        }
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not fetch backend SSH config, falling back to local storage', e);
+            }
+
             try {
                 const raw = localStorage.getItem(SSH_CONFIG_KEY);
                 if (raw) {
                     const cfg = JSON.parse(raw);
-                    if (cfg.host) document.getElementById('sshModalHost').value = cfg.host;
-                    if (cfg.port) document.getElementById('sshModalPort').value = cfg.port;
-                    if (cfg.username) document.getElementById('sshModalUser').value = cfg.username;
-                    if (cfg.alias) document.getElementById('sshModalAlias').value = cfg.alias;
-                    if (cfg.authType) {
+                    if (cfg.host && document.getElementById('sshModalHost')) document.getElementById('sshModalHost').value = cfg.host;
+                    if (cfg.port && document.getElementById('sshModalPort')) document.getElementById('sshModalPort').value = cfg.port;
+                    if (cfg.username && document.getElementById('sshModalUser')) document.getElementById('sshModalUser').value = cfg.username;
+                    if (cfg.alias && document.getElementById('sshModalAlias')) document.getElementById('sshModalAlias').value = cfg.alias;
+                    if (cfg.authType && document.getElementById('sshModalAuthType')) {
                         document.getElementById('sshModalAuthType').value = cfg.authType;
                         onSshAuthTypeChange();
                     }
                     if (cfg.keyPath && document.getElementById('sshModalKeyPath')) {
                         document.getElementById('sshModalKeyPath').value = cfg.keyPath;
+                    }
+                    if (document.getElementById('sshModalAutoConnect') && cfg.autoConnect !== undefined) {
+                        document.getElementById('sshModalAutoConnect').checked = !!cfg.autoConnect;
                     }
                 }
             } catch (e) {
@@ -2113,7 +2152,7 @@
             }
         }
 
-        function saveSshConfigNonSensitive(host, port, username, authType, alias, keyPath) {
+        function saveSshConfigNonSensitive(host, port, username, authType, alias, keyPath, autoConnect) {
             try {
                 // SECURITY AUDIT: Only non-sensitive connection parameters are saved.
                 // Raw passwords and private key contents are NEVER written to localStorage.
@@ -2123,7 +2162,8 @@
                     username: username || '',
                     authType: authType || 'PASSWORD',
                     alias: alias || 'default',
-                    keyPath: keyPath || ''
+                    keyPath: keyPath || '',
+                    autoConnect: !!autoConnect
                 };
                 localStorage.setItem(SSH_CONFIG_KEY, JSON.stringify(cfg));
             } catch (e) {
@@ -2223,8 +2263,11 @@
                 return;
             }
             if (authType === 'PASSWORD' && !password) {
-                showSshBanner('error', '⚠️ Password is required for Password Authentication.');
-                return;
+                const isSaved = passwordInput && passwordInput.placeholder && passwordInput.placeholder.includes('Saved password');
+                if (!isSaved) {
+                    showSshBanner('error', '⚠️ Password is required for Password Authentication.');
+                    return;
+                }
             }
             if (authType === 'KEY_FILE' && !keyPath) {
                 showSshBanner('error', '⚠️ Private key file path is required.');
@@ -2242,12 +2285,16 @@
             }
             showSshBanner('info', `⏳ Connecting to ${escapeHtml(username)}@${escapeHtml(host)}:${port}...`);
 
+            const autoConnectEl = document.getElementById('sshModalAutoConnect');
+            const autoConnect = autoConnectEl ? autoConnectEl.checked : false;
+
             const payload = {
                 host: host,
                 port: port,
                 username: username,
                 authType: authType,
-                sessionAlias: sessionAlias
+                sessionAlias: sessionAlias,
+                autoConnect: autoConnect
             };
 
             if (authType === 'PASSWORD') payload.password = password;
@@ -2284,7 +2331,7 @@
 
                 if (res.ok && data.status === 'connected') {
                     showSshBanner('success', `✓ Successfully connected to <strong>${escapeHtml(data.username)}@${escapeHtml(data.host)}:${data.port}</strong> (alias: <code>${escapeHtml(data.alias || sessionAlias)}</code>)`);
-                    saveSshConfigNonSensitive(host, port, username, authType, sessionAlias, keyPath);
+                    saveSshConfigNonSensitive(host, port, username, authType, sessionAlias, keyPath, autoConnect);
                     updateSshStatusIndicator(true);
                     checkSshStatus();
                 } else {
@@ -2499,6 +2546,14 @@
                 <div class="ssh-form-row" id="sshRowPassphrase" style="display:none;">
                     <label class="ssh-form-label" for="sshModalPassphrase">Key Passphrase <span style="font-weight:normal;opacity:0.7;">(optional)</span></label>
                     <input type="password" id="sshModalPassphrase" class="ssh-form-input" placeholder="Passphrase for private key (if encrypted)" autocomplete="new-password" />
+                </div>
+
+                <!-- Auto-Connect on Startup Option -->
+                <div class="ssh-form-row" style="margin-top: 10px; margin-bottom: 2px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; user-select:none;">
+                        <input type="checkbox" id="sshModalAutoConnect" style="cursor:pointer; width:15px; height:15px; accent-color:var(--accent);" />
+                        <span style="font-size:13px; font-weight:500;">Auto-connect on startup</span>
+                    </label>
                 </div>
             </div>
             <div class="ssh-modal-footer">

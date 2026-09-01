@@ -14,6 +14,7 @@ public final class StoreKeys {
     public static final String AGENT_MEMORIES = "agent_memories";
     public static final String MCP_SERVERS = "mcp_servers";
     public static final String OLLAMA_SERVERS = "ollama_servers";
+    public static final String SSH_SANDBOX_CONFIG = "ssh_sandbox_config";
 
     // Knowledge store prefix
     public static final String KNOWLEDGE_PREFIX = "knowledge:";

@@ -1,6 +1,7 @@
 package com.mkpro.infra.ssh;
 
 import com.jcraft.jsch.*;
+import com.mkpro.CentralMemory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -14,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * SshSessionManager manages persistent SSH and SFTP connections using JSch.
  * Supports multi-session management, password and key authentication, remote command execution,
- * and SFTP file transfers.
+ * SFTP file transfers, persistent credential caching in CentralMemory / MapDB, and background auto-reconnect.
  */
 public class SshSessionManager {
 
@@ -135,36 +136,90 @@ public class SshSessionManager {
     }
 
     /**
+     * Connect to a remote host using a saved SshSandboxConfig.
+     */
+    public synchronized SshSessionEntry connect(SshSandboxConfig config) throws Exception {
+        if (config == null || !config.isValid()) {
+            throw new IllegalArgumentException("Invalid SSH Sandbox configuration.");
+        }
+        return connect(
+            config.getHost(),
+            config.getPort(),
+            config.getUsername(),
+            config.getPassword(),
+            config.getPrivateKeyPath(),
+            config.getPrivateKeyContent(),
+            config.getPassphrase(),
+            config.getAuthType(),
+            config.getAlias(),
+            config.isAutoConnect(),
+            true
+        );
+    }
+
+    /**
      * Connect to a remote host and store the active session.
+     * Optionally saves/updates the configuration in CentralMemory.
      */
     public synchronized SshSessionEntry connect(String host, int port, String username,
                                                 String password, String privateKeyPath,
                                                 String privateKeyContent, String passphrase,
-                                                AuthType authType, String alias) throws Exception {
+                                                AuthType authType, String alias,
+                                                boolean autoConnect, boolean saveConfig) throws Exception {
         String effectiveAlias = (alias == null || alias.isBlank()) ? "default" : alias.trim();
         int effectivePort = (port <= 0) ? 22 : port;
+        String cleanHost = (host != null) ? host.trim() : "";
+        String cleanUser = (username != null) ? username.trim() : "";
+        AuthType resolvedAuth = (authType != null) ? authType : AuthType.PASSWORD;
 
         // Disconnect existing session with the same alias if any
         disconnect(effectiveAlias);
 
-        AuthType resolvedAuth = (authType != null) ? authType : AuthType.PASSWORD;
+        // If credentials (password/keyContent/passphrase) are empty or null, check CentralMemory for saved credentials
+        CentralMemory cm = CentralMemory.getInstance();
+        SshSandboxConfig existingCfg = null;
+        try {
+            existingCfg = cm.getSshSandboxConfig();
+        } catch (Exception ignored) {}
+
+        String effectivePassword = password;
+        String effectiveKeyContent = privateKeyContent;
+        String effectivePassphrase = passphrase;
+        String effectiveKeyPath = privateKeyPath;
+
+        if (existingCfg != null && existingCfg.isValid()
+                && existingCfg.getHost().equalsIgnoreCase(cleanHost)
+                && existingCfg.getUsername().equals(cleanUser)) {
+            if ((effectivePassword == null || effectivePassword.isBlank()) && existingCfg.hasPassword()) {
+                effectivePassword = existingCfg.getPassword();
+            }
+            if ((effectiveKeyContent == null || effectiveKeyContent.isBlank()) && existingCfg.hasPrivateKeyContent()) {
+                effectiveKeyContent = existingCfg.getPrivateKeyContent();
+            }
+            if ((effectivePassphrase == null || effectivePassphrase.isBlank()) && existingCfg.hasPassphrase()) {
+                effectivePassphrase = existingCfg.getPassphrase();
+            }
+            if ((effectiveKeyPath == null || effectiveKeyPath.isBlank()) && !existingCfg.getPrivateKeyPath().isBlank()) {
+                effectiveKeyPath = existingCfg.getPrivateKeyPath();
+            }
+        }
 
         // Configure authentication
-        if (resolvedAuth == AuthType.KEY_FILE && privateKeyPath != null && !privateKeyPath.isBlank()) {
-            if (passphrase != null && !passphrase.isBlank()) {
-                jsch.addIdentity(privateKeyPath, passphrase);
+        if (resolvedAuth == AuthType.KEY_FILE && effectiveKeyPath != null && !effectiveKeyPath.isBlank()) {
+            if (effectivePassphrase != null && !effectivePassphrase.isBlank()) {
+                jsch.addIdentity(effectiveKeyPath, effectivePassphrase);
             } else {
-                jsch.addIdentity(privateKeyPath);
+                jsch.addIdentity(effectiveKeyPath);
             }
-        } else if (resolvedAuth == AuthType.KEY_CONTENT && privateKeyContent != null && !privateKeyContent.isBlank()) {
-            byte[] prvkey = privateKeyContent.getBytes(StandardCharsets.UTF_8);
-            byte[] pass = (passphrase != null && !passphrase.isBlank()) ? passphrase.getBytes(StandardCharsets.UTF_8) : null;
+        } else if (resolvedAuth == AuthType.KEY_CONTENT && effectiveKeyContent != null && !effectiveKeyContent.isBlank()) {
+            byte[] prvkey = effectiveKeyContent.getBytes(StandardCharsets.UTF_8);
+            byte[] pass = (effectivePassphrase != null && !effectivePassphrase.isBlank()) ? effectivePassphrase.getBytes(StandardCharsets.UTF_8) : null;
             jsch.addIdentity("inline-key-" + effectiveAlias, prvkey, null, pass);
         }
 
-        Session session = jsch.getSession(username, host, effectivePort);
-        if (password != null && !password.isBlank()) {
-            session.setPassword(password);
+        Session session = jsch.getSession(cleanUser, cleanHost, effectivePort);
+        if (effectivePassword != null && !effectivePassword.isBlank()) {
+            session.setPassword(effectivePassword);
         }
 
         Properties config = new Properties();
@@ -173,9 +228,80 @@ public class SshSessionManager {
         session.setTimeout(15000); // 15s socket timeout
         session.connect(15000);
 
-        SshSessionEntry entry = new SshSessionEntry(effectiveAlias, host, effectivePort, username, session);
+        SshSessionEntry entry = new SshSessionEntry(effectiveAlias, cleanHost, effectivePort, cleanUser, session);
         sessions.put(effectiveAlias, entry);
+
+        // If requested, persist config securely into CentralMemory / MapDB
+        if (saveConfig) {
+            try {
+                SshSandboxConfig newCfg = (existingCfg != null && existingCfg.getHost().equalsIgnoreCase(cleanHost) && existingCfg.getUsername().equals(cleanUser))
+                        ? existingCfg
+                        : new SshSandboxConfig();
+                newCfg.setHost(cleanHost);
+                newCfg.setPort(effectivePort);
+                newCfg.setUsername(cleanUser);
+                newCfg.setAlias(effectiveAlias);
+                newCfg.setAuthType(resolvedAuth);
+                newCfg.setPrivateKeyPath(effectiveKeyPath != null ? effectiveKeyPath : "");
+                if (effectivePassword != null && !effectivePassword.isBlank()) {
+                    newCfg.setPassword(effectivePassword);
+                }
+                if (effectiveKeyContent != null && !effectiveKeyContent.isBlank()) {
+                    newCfg.setPrivateKeyContent(effectiveKeyContent);
+                }
+                if (effectivePassphrase != null && !effectivePassphrase.isBlank()) {
+                    newCfg.setPassphrase(effectivePassphrase);
+                }
+                newCfg.setAutoConnect(autoConnect);
+                cm.saveSshSandboxConfig(newCfg);
+            } catch (Exception e) {
+                System.err.println("[SshSessionManager] Warning: failed to save SSH config to CentralMemory: " + e.getMessage());
+            }
+        }
+
         return entry;
+    }
+
+    /**
+     * Connect to a remote host and store the active session.
+     */
+    public synchronized SshSessionEntry connect(String host, int port, String username,
+                                                String password, String privateKeyPath,
+                                                String privateKeyContent, String passphrase,
+                                                AuthType authType, String alias) throws Exception {
+        return connect(host, port, username, password, privateKeyPath, privateKeyContent, passphrase, authType, alias, false, true);
+    }
+
+    /**
+     * Automatically connect to the saved Sandbox SSH environment in the background
+     * if autoConnect is enabled in CentralMemory.
+     */
+    public void autoConnect() {
+        Thread t = new Thread(() -> {
+            try {
+                CentralMemory cm = CentralMemory.getInstance();
+                SshSandboxConfig cfg = cm.getSshSandboxConfig();
+                if (cfg == null || !cfg.isValid() || !cfg.isAutoConnect()) {
+                    return;
+                }
+
+                String alias = cfg.getAlias();
+                if (hasActiveSession(alias)) {
+                    return; // Already connected
+                }
+
+                System.out.println("\u001b[34m[SSH] Auto-connecting to sandbox " + cfg.getUsername() + "@" +
+                        cfg.getHost() + ":" + cfg.getPort() + " (alias: " + alias + ")... \u001b[0m");
+
+                connect(cfg);
+
+                System.out.println("\u001b[32m[SSH] Sandbox auto-connected successfully (alias: " + alias + ").\u001b[0m");
+            } catch (Exception e) {
+                System.out.println("\u001b[33m[SSH] Sandbox auto-connect skipped/failed: " + e.getMessage() + "\u001b[0m");
+            }
+        }, "ssh-sandbox-autoconnect");
+        t.setDaemon(true);
+        t.start();
     }
 
     /**

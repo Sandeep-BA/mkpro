@@ -1,5 +1,7 @@
 package com.mkpro;
 
+import com.mkpro.core.StoreKeys;
+import com.mkpro.infra.ssh.SshSandboxConfig;
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.AgentStat;
 import com.mkpro.models.Goal;
@@ -26,13 +28,14 @@ import java.util.stream.Collectors;
  *   - Located in the project's .mkpro/ directory, named per-instance
  *
  * SHARED STORE (brief file lock, retry on contention):
- *   - Agent configs, goals, memories, MCP servers, Ollama servers
+ *   - Agent configs, goals, memories, MCP servers, Ollama servers, SSH Sandbox config
  *   - Located in ~/Documents/mkpro/central_memory.db
  *   - Opened briefly per write operation; reads served from cache
  *
  * LOCAL CACHE (in-memory, populated on startup, invalidated on writes):
  *   - Agent configs (read on every runner creation)
  *   - MCP servers (read during tool creation)
+ *   - SSH Sandbox config (read during connect / auto-connect)
  *   - Avoids opening the shared DB for frequent reads
  */
 public class CentralMemory {
@@ -51,6 +54,7 @@ public class CentralMemory {
     private volatile List<McpServer> mcpServerCache = null;
     private volatile List<String> ollamaServerCache = null;
     private volatile String selectedOllamaServerCache = null;
+    private volatile SshSandboxConfig sshSandboxConfigCache = null;
     private volatile boolean configCacheLoaded = false;
 
     private static final int MAX_RETRIES = 3;
@@ -198,6 +202,10 @@ public class CentralMemory {
                 // Load selected Ollama server
                 Map<String, String> selectedMap = db.hashMap("selected_ollama_server", Serializer.STRING, Serializer.STRING).createOrOpen();
                 selectedOllamaServerCache = selectedMap.getOrDefault("url", "");
+
+                // Load SSH sandbox config
+                Map<String, SshSandboxConfig> sshMap = db.hashMap("ssh_sandbox_config", Serializer.STRING, Serializer.JAVA).createOrOpen();
+                sshSandboxConfigCache = sshMap.get("default");
             });
         } catch (Exception e) {
             System.err.println("[CentralMemory] Warning: could not load cache from shared DB: " + e.getMessage());
@@ -214,6 +222,7 @@ public class CentralMemory {
         mcpServerCache = null;
         ollamaServerCache = null;
         selectedOllamaServerCache = null;
+        sshSandboxConfigCache = null;
         loadCacheFromShared();
     }
 
@@ -383,12 +392,25 @@ public class CentralMemory {
             goalsMap.forEach((k, v) -> goalStrings.put(k, v != null ? v.toString() : "null"));
             r.put("project_goals", goalStrings);
 
+            // SSH Sandbox Config (dump safe representation)
+            Map<String, Object> sshMap = db.hashMap("ssh_sandbox_config", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            Map<String, String> sshStrings = new java.util.LinkedHashMap<>();
+            sshMap.forEach((k, v) -> {
+                if (v instanceof SshSandboxConfig) {
+                    sshStrings.put(k, ((SshSandboxConfig) v).toSafeMap().toString());
+                } else {
+                    sshStrings.put(k, v != null ? v.toString() : "null");
+                }
+            });
+            r.put("ssh_sandbox_config", sshStrings);
+
             return r;
         });
         result.putAll(shared);
 
         // Local stats (agent_stats from local DB)
         try {
+            @SuppressWarnings("unchecked")
             List<AgentStat> stats = (List<AgentStat>) localDb.indexTreeList("agent_stats", Serializer.JAVA).createOrOpen();
             Map<String, String> statsMap = new java.util.LinkedHashMap<>();
             int count = Math.min(stats.size(), 100); // Last 100 entries
@@ -621,6 +643,51 @@ public class CentralMemory {
     }
 
     // ==========================================================================
+    // CACHED PATH — SSH Sandbox Config (MapDB shared DB, cached reads)
+    // ==========================================================================
+
+    /**
+     * Retrieve the persistent SSH Sandbox configuration.
+     * Served from local cache; loaded from shared MapDB if needed.
+     */
+    public SshSandboxConfig getSshSandboxConfig() {
+        if (sshSandboxConfigCache != null) {
+            return sshSandboxConfigCache;
+        }
+        SshSandboxConfig cfg = withSharedDb(db -> {
+            Map<String, SshSandboxConfig> sshMap = db.hashMap("ssh_sandbox_config", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            return sshMap.get("default");
+        });
+        sshSandboxConfigCache = cfg;
+        return cfg;
+    }
+
+    /**
+     * Save/update the SSH Sandbox configuration in shared MapDB.
+     */
+    public void saveSshSandboxConfig(SshSandboxConfig config) {
+        withSharedDbVoid(db -> {
+            Map<String, SshSandboxConfig> sshMap = db.hashMap("ssh_sandbox_config", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            if (config != null) {
+                config.setUpdatedAt(System.currentTimeMillis());
+                sshMap.put("default", config);
+            } else {
+                sshMap.remove("default");
+            }
+            db.commit();
+        });
+        sshSandboxConfigCache = config;
+        notifyListeners(StoreKeys.SSH_SANDBOX_CONFIG, config);
+    }
+
+    /**
+     * Delete the persistent SSH Sandbox configuration.
+     */
+    public void deleteSshSandboxConfig() {
+        saveSshSandboxConfig(null);
+    }
+
+    // ==========================================================================
     // SYNCHRONIZATION — Called by SyncEngine when remote peer pushes updates
     // ==========================================================================
 
@@ -659,6 +726,15 @@ public class CentralMemory {
                 Map<String, String> selected = db.hashMap("selected_ollama_server", Serializer.STRING, Serializer.STRING).createOrOpen();
                 selected.put("url", (String) value);
                 selectedOllamaServerCache = (String) value;
+            } else if (key.equals("ssh_sandbox_config") || key.equals(StoreKeys.SSH_SANDBOX_CONFIG)) {
+                Map<String, SshSandboxConfig> sshMap = db.hashMap("ssh_sandbox_config", Serializer.STRING, Serializer.JAVA).createOrOpen();
+                SshSandboxConfig cfg = (SshSandboxConfig) value;
+                if (cfg != null) {
+                    sshMap.put("default", cfg);
+                } else {
+                    sshMap.remove("default");
+                }
+                sshSandboxConfigCache = cfg;
             }
             db.commit();
         });

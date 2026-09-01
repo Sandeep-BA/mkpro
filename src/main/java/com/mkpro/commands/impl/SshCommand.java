@@ -1,8 +1,10 @@
 package com.mkpro.commands.impl;
 
+import com.mkpro.CentralMemory;
 import com.mkpro.commands.Command;
 import com.mkpro.core.MkProContext;
 import com.mkpro.infra.ssh.AuthType;
+import com.mkpro.infra.ssh.SshSandboxConfig;
 import com.mkpro.infra.ssh.SshSessionManager;
 
 import java.util.List;
@@ -11,10 +13,12 @@ import static com.mkpro.ui.AnsiColors.*;
 
 /**
  * /ssh command handler:
- * - /ssh <command>                   -> Directly executes bash/shell command on the active remote SSH session
- * - /ssh status                      -> Lists all active SSH sessions and status
- * - /ssh connect <host> <user> [pwd] [port] [alias] -> Connects to remote SSH server
- * - /ssh disconnect [alias]          -> Terminates session
+ * - /ssh <command>                                  -> Directly executes bash/shell command on the active remote SSH session
+ * - /ssh status                                     -> Lists all active SSH sessions and status
+ * - /ssh config                                     -> Displays saved persistent SSH sandbox configuration
+ * - /ssh autoconnect [on|off]                       -> Toggles auto-connection on application startup
+ * - /ssh connect <host> <user> [pwd] [port] [alias] -> Connects to remote SSH server and saves configuration
+ * - /ssh disconnect [alias]                         -> Terminates session
  * - /ssh transfer <upload|download> <localPath> <remotePath> [alias] -> SFTP transfer
  */
 public class SshCommand implements Command {
@@ -24,6 +28,7 @@ public class SshCommand implements Command {
         var terminal = context.getTerminal();
         var writer = terminal.writer();
         SshSessionManager sshManager = SshSessionManager.getInstance();
+        CentralMemory cm = context != null ? context.getCentralMemory() : CentralMemory.getInstance();
 
         if (args == null || args.length == 0) {
             printUsage(writer, sshManager);
@@ -53,7 +58,53 @@ public class SshCommand implements Command {
             return;
         }
 
-        // 2. /ssh connect <host> <username> [password] [port] [alias]
+        // 2. /ssh config
+        if ("config".equalsIgnoreCase(sub)) {
+            SshSandboxConfig cfg = cm != null ? cm.getSshSandboxConfig() : null;
+            if (cfg == null || !cfg.isValid()) {
+                writer.println(ANSI_YELLOW + "No saved Sandbox SSH configuration found." + ANSI_RESET);
+                writer.println(ANSI_DIM + "Use /ssh connect <host> <user> [pass] to connect and persist settings." + ANSI_RESET);
+            } else {
+                writer.println(ANSI_BOLD + ANSI_CYAN + "Persistent Sandbox SSH Configuration:" + ANSI_RESET);
+                writer.println("   Host: " + cfg.getHost() + ":" + cfg.getPort());
+                writer.println("   User: " + cfg.getUsername() + " (alias: '" + cfg.getAlias() + "')");
+                writer.println("   Auth: " + cfg.getAuthType());
+                if (!cfg.getPrivateKeyPath().isEmpty()) {
+                    writer.println("   Key Path: " + cfg.getPrivateKeyPath());
+                }
+                writer.println("   Has Password: " + (cfg.hasPassword() ? ANSI_GREEN + "YES" : ANSI_YELLOW + "NO") + ANSI_RESET);
+                writer.println("   Has Inline Key: " + (cfg.hasPrivateKeyContent() ? ANSI_GREEN + "YES" : ANSI_YELLOW + "NO") + ANSI_RESET);
+                writer.println("   Auto-Connect: " + (cfg.isAutoConnect() ? ANSI_GREEN + "ENABLED (on startup)" : ANSI_YELLOW + "DISABLED") + ANSI_RESET);
+            }
+            writer.flush();
+            return;
+        }
+
+        // 3. /ssh autoconnect [on|off]
+        if ("autoconnect".equalsIgnoreCase(sub) || "auto-connect".equalsIgnoreCase(sub)) {
+            SshSandboxConfig cfg = cm != null ? cm.getSshSandboxConfig() : null;
+            if (cfg == null || !cfg.isValid()) {
+                writer.println(ANSI_YELLOW + "No saved Sandbox SSH configuration found to configure auto-connect." + ANSI_RESET);
+                writer.println(ANSI_DIM + "Connect first using: /ssh connect <host> <username> [password]" + ANSI_RESET);
+                writer.flush();
+                return;
+            }
+
+            if (args.length > 1) {
+                String val = args[1].trim().toLowerCase();
+                boolean enable = "on".equals(val) || "true".equals(val) || "1".equals(val) || "yes".equals(val) || "enable".equals(val);
+                cfg.setAutoConnect(enable);
+                cm.saveSshSandboxConfig(cfg);
+                writer.println(ANSI_GREEN + "Auto-connect on startup set to: " + (enable ? "ENABLED" : "DISABLED") + ANSI_RESET);
+            } else {
+                writer.println("Auto-connect is currently " + (cfg.isAutoConnect() ? ANSI_GREEN + "ENABLED" : ANSI_YELLOW + "DISABLED") + ANSI_RESET);
+                writer.println(ANSI_DIM + "Toggle with: /ssh autoconnect on  OR  /ssh autoconnect off" + ANSI_RESET);
+            }
+            writer.flush();
+            return;
+        }
+
+        // 4. /ssh connect <host> <username> [password] [port] [alias]
         if ("connect".equalsIgnoreCase(sub)) {
             if (args.length < 3) {
                 writer.println(ANSI_YELLOW + "Usage: /ssh connect <host> <username> [password] [port] [alias]" + ANSI_RESET);
@@ -80,7 +131,7 @@ public class SshCommand implements Command {
             writer.println(ANSI_BLUE + "Connecting to " + username + "@" + host + ":" + port + " (alias: " + alias + ")..." + ANSI_RESET);
             writer.flush();
             try {
-                var entry = sshManager.connect(host, port, username, password, null, null, null, AuthType.PASSWORD, alias);
+                var entry = sshManager.connect(host, port, username, password, null, null, null, AuthType.PASSWORD, alias, false, true);
                 writer.println(ANSI_GREEN + "Connected successfully to " + entry.getUsername() + "@" + entry.getHost() + ":" + entry.getPort() + " (alias='" + entry.getAlias() + "')" + ANSI_RESET);
             } catch (Exception e) {
                 writer.println(ANSI_RED + "Connection failed: " + e.getMessage() + ANSI_RESET);
@@ -89,7 +140,7 @@ public class SshCommand implements Command {
             return;
         }
 
-        // 3. /ssh disconnect [alias]
+        // 5. /ssh disconnect [alias]
         if ("disconnect".equalsIgnoreCase(sub) || "close".equalsIgnoreCase(sub)) {
             String alias = args.length > 1 ? args[1] : "default";
             boolean disconnected = sshManager.disconnect(alias);
@@ -102,7 +153,7 @@ public class SshCommand implements Command {
             return;
         }
 
-        // 4. /ssh transfer <upload|download> <localPath> <remotePath> [alias]
+        // 6. /ssh transfer <upload|download> <localPath> <remotePath> [alias]
         if ("transfer".equalsIgnoreCase(sub) || "sftp".equalsIgnoreCase(sub)) {
             if (args.length < 4) {
                 writer.println(ANSI_YELLOW + "Usage: /ssh transfer <upload|download> <localPath> <remotePath> [alias]" + ANSI_RESET);
@@ -135,7 +186,7 @@ public class SshCommand implements Command {
             return;
         }
 
-        // 5. Default: Direct command execution on active SSH session (/ssh <remote bash command>)
+        // 7. Default: Direct command execution on active SSH session (/ssh <remote bash command>)
         String command = String.join(" ", args).trim();
         String activeAlias = null;
         if (sshManager.hasActiveSession("default")) {
@@ -187,6 +238,8 @@ public class SshCommand implements Command {
         writer.println(ANSI_BOLD + ANSI_CYAN + "SSH Commands & Remote Execution:" + ANSI_RESET);
         writer.println("  /ssh <command>                                      - Execute bash command on active remote session");
         writer.println("  /ssh status                                         - Show active SSH sessions");
+        writer.println("  /ssh config                                         - Show saved persistent sandbox SSH config");
+        writer.println("  /ssh autoconnect [on|off]                           - Toggle auto-connect on application startup");
         writer.println("  /ssh connect <host> <user> [pass] [port] [alias]    - Connect to remote SSH host");
         writer.println("  /ssh disconnect [alias]                             - Disconnect SSH session");
         writer.println("  /ssh transfer <upload|download> <local> <remote>    - SFTP file transfer");
@@ -207,6 +260,6 @@ public class SshCommand implements Command {
 
     @Override
     public String getDescription() {
-        return "Execute remote commands or manage SSH connections (/ssh <cmd>, /ssh status, /ssh connect ...)";
+        return "Execute remote commands or manage SSH connections (/ssh <cmd>, /ssh status, /ssh config, /ssh autoconnect, /ssh connect ...)";
     }
 }

@@ -152,51 +152,37 @@ public class BootstrapService {
                             });
                         });
                     },
-                    error -> {
-                        errorRef.set(error.getMessage());
-                        latch.countDown();
-                    },
+                    error -> { errorRef.set(error.getMessage()); latch.countDown(); },
                     latch::countDown
                 );
 
             latch.await(120, java.util.concurrent.TimeUnit.SECONDS);
 
             if (errorRef.get() != null) {
-                System.out.println(ANSI_YELLOW + "[Knowledge] Analysis error for " + topicName + ": " + errorRef.get() + ANSI_RESET);
-                return null;
+                System.out.println(ANSI_YELLOW + "[Knowledge] Runner analysis error for " + topicName + ": " + errorRef.get() + ANSI_RESET);
+                return prompt.length() > 2000 ? prompt.substring(0, 2000) : prompt;
             }
 
             String result = responseText.toString().trim();
-            if (result.isEmpty()) {
-                return null;
-            }
-
-            System.out.println(ANSI_GREEN + "[Knowledge] Analysis complete for " + topicName + " (" + result.length() + " chars)" + ANSI_RESET);
-            return result;
-
+            return result.isEmpty() ? (prompt.length() > 2000 ? prompt.substring(0, 2000) : prompt) : result;
         } catch (Exception e) {
-            System.out.println(ANSI_YELLOW + "[Knowledge] Analysis failed for " + topicName + ": " + e.getMessage() + ANSI_RESET);
-            return null;
+            System.out.println(ANSI_YELLOW + "[Knowledge] Analysis interrupted for " + topicName + ": " + e.getMessage() + ANSI_RESET);
+            return prompt.length() > 2000 ? prompt.substring(0, 2000) : prompt;
         }
     }
 
     private java.util.List<com.mkpro.knowledge.TopicConfig> loadSchedulesConfig() {
         java.util.List<com.mkpro.knowledge.TopicConfig> topics = new java.util.ArrayList<>();
 
-        // Look for schedules.yaml in multiple locations (priority order):
-        // 1. .mkpro/schedules.yaml (project-local)
-        // 2. ~/Documents/mkpro/schedules.yaml (user-global)
-        Path[] searchPaths = {
-            Paths.get(".mkpro", "schedules.yaml"),
-            Paths.get(System.getProperty("user.home"), "Documents", "mkpro", "schedules.yaml")
-        };
-
+        // Look for schedules.yaml in .mkpro/ or project root
         Path configPath = null;
-        for (Path p : searchPaths) {
-            if (Files.exists(p)) {
-                configPath = p;
-                break;
-            }
+        Path localPath = Paths.get(".mkpro", "schedules.yaml");
+        Path rootPath = Paths.get("schedules.yaml");
+
+        if (Files.exists(localPath)) {
+            configPath = localPath;
+        } else if (Files.exists(rootPath)) {
+            configPath = rootPath;
         }
 
         if (configPath == null) {
@@ -340,6 +326,9 @@ public class BootstrapService {
 
             context.setCentralMemory(new CentralMemory());
             
+            // Auto-connect to persistent SSH Sandbox environment if configured
+            com.mkpro.infra.ssh.SshSessionManager.getInstance().autoConnect();
+
             // Seed default public MCP servers on first run (safe, no data leakage)
             seedDefaultMcpServers(context.getCentralMemory());
 
