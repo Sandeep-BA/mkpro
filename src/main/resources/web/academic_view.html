@@ -1736,6 +1736,261 @@
             border-radius: 8px;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
         }
+
+        /* Remote SSH Button & Status in Academic Masthead */
+        .ssh-header-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--surface-hover);
+            border: none;
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--ink-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .ssh-header-btn:hover {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+        .ssh-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        .ssh-status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 6px rgba(40, 125, 67, 0.4);
+        }
+        .ssh-status-dot.disconnected {
+            background: var(--muted);
+        }
+
+        /* Remote SSH Modal Dialog (Academic Aesthetic) */
+        .ssh-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .ssh-modal-overlay.active {
+            display: flex;
+        }
+        .ssh-modal-card {
+            background: var(--surface-elevated);
+            color: var(--ink);
+            border-radius: 14px;
+            box-shadow: var(--shadow-dock), 0 20px 50px rgba(0, 0, 0, 0.25);
+            width: 100%;
+            max-width: 540px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            animation: modal-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        [data-theme="dark"] .ssh-modal-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .ssh-modal-header {
+            padding: 14px 20px;
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        [data-theme="dark"] .ssh-modal-header {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .ssh-modal-header h3 {
+            font-size: 14px;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+        .ssh-modal-close-btn {
+            background: transparent;
+            border: none;
+            color: var(--muted);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .ssh-modal-close-btn:hover {
+            color: var(--danger);
+            background: var(--accent-soft);
+        }
+        .ssh-modal-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow-y: auto;
+            max-height: 75vh;
+            background: var(--surface-elevated);
+        }
+        .ssh-form-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .ssh-form-row.row-split {
+            flex-direction: row;
+            gap: 12px;
+        }
+        .ssh-form-row.row-split > div {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .ssh-form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--ink-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ssh-form-label span.req { color: var(--danger); }
+        .ssh-form-input, .ssh-form-select, .ssh-form-textarea {
+            background: var(--bg);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: var(--ink);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.15s;
+            width: 100%;
+        }
+        [data-theme="dark"] .ssh-form-input, [data-theme="dark"] .ssh-form-select, [data-theme="dark"] .ssh-form-textarea {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .ssh-form-input:focus, .ssh-form-select:focus, .ssh-form-textarea:focus {
+            border-color: var(--accent);
+        }
+        .ssh-form-textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        .ssh-status-banner {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            display: none;
+            word-break: break-word;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .ssh-status-banner.success {
+            display: block;
+            background: var(--wash-diff-add);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        .ssh-status-banner.error {
+            display: block;
+            background: var(--wash-diff-del);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+        .ssh-status-banner.info {
+            display: block;
+            background: var(--wash-coder);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+        .ssh-active-sessions {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 10px 12px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        [data-theme="dark"] .ssh-active-sessions {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .ssh-active-header {
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ssh-active-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px dashed rgba(0, 0, 0, 0.1);
+        }
+        [data-theme="dark"] .ssh-active-item {
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+        }
+        .ssh-active-item:last-child { border-bottom: none; }
+        .ssh-modal-footer {
+            padding: 14px 20px;
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-top: 1px solid rgba(0, 0, 0, 0.06);
+            gap: 10px;
+        }
+        [data-theme="dark"] .ssh-modal-footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .ssh-footer-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .ssh-btn {
+            padding: 7px 16px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.15s;
+        }
+        .ssh-btn:hover { opacity: 0.9; }
+        .ssh-btn-connect {
+            background: var(--success);
+            color: white;
+        }
+        .ssh-btn-disconnect {
+            background: var(--danger);
+            color: white;
+        }
+        .ssh-btn-cancel {
+            background: var(--surface-hover);
+            color: var(--ink-secondary);
+        }
+
     </style>
 </head>
 <body>
@@ -1769,6 +2024,10 @@
             </div>
 
             <div class="masthead-actions">
+                <button class="icon-btn ssh-header-btn" id="sshHeaderBtn" onclick="openSshModal()" title="Remote SSH Credentials & Connections">
+                    <span class="ssh-status-dot disconnected" id="sshStatusDot"></span>
+                    <span>🔌 Remote SSH</span>
+                </button>
                 <button class="icon-btn" onclick="toggleDrawer()" title="Toggle Files &amp; Goals Drawer (Ctrl + B)">📁 Drawer</button>
                 <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
                 <div style="display:inline-flex; align-items:center; margin-left:6px; font-size:12px; color:var(--muted);">
@@ -3951,6 +4210,387 @@
 
         // Initialize WebSocket on Load
         connect();
+    
+        // ========================================================================
+        // Remote SSH Credentials & Management Module (Academic View)
+        // ========================================================================
+        const SSH_CONFIG_KEY = 'mkpro-ssh-config';
+
+        function loadSshConfig() {
+            try {
+                const raw = localStorage.getItem(SSH_CONFIG_KEY);
+                if (raw) {
+                    const cfg = JSON.parse(raw);
+                    if (cfg.host && document.getElementById('sshModalHost')) document.getElementById('sshModalHost').value = cfg.host;
+                    if (cfg.port && document.getElementById('sshModalPort')) document.getElementById('sshModalPort').value = cfg.port;
+                    if (cfg.username && document.getElementById('sshModalUser')) document.getElementById('sshModalUser').value = cfg.username;
+                    if (cfg.alias && document.getElementById('sshModalAlias')) document.getElementById('sshModalAlias').value = cfg.alias;
+                    if (cfg.authType && document.getElementById('sshModalAuthType')) {
+                        document.getElementById('sshModalAuthType').value = cfg.authType;
+                        onSshAuthTypeChange();
+                    }
+                    if (cfg.keyPath && document.getElementById('sshModalKeyPath')) {
+                        document.getElementById('sshModalKeyPath').value = cfg.keyPath;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load SSH config:', e);
+            }
+        }
+
+        function saveSshConfigNonSensitive(host, port, username, authType, alias, keyPath) {
+            try {
+                // SECURITY AUDIT: Only non-sensitive connection parameters are saved.
+                // Raw passwords and private key contents are NEVER written to localStorage.
+                const cfg = {
+                    host: host || '',
+                    port: port || 22,
+                    username: username || '',
+                    authType: authType || 'PASSWORD',
+                    alias: alias || 'default',
+                    keyPath: keyPath || ''
+                };
+                localStorage.setItem(SSH_CONFIG_KEY, JSON.stringify(cfg));
+            } catch (e) {
+                console.error('Failed to save SSH config:', e);
+            }
+        }
+
+        function onSshAuthTypeChange() {
+            const authType = document.getElementById('sshModalAuthType').value;
+            const rowPass = document.getElementById('sshRowPassword');
+            const rowKeyPath = document.getElementById('sshRowKeyPath');
+            const rowKeyContent = document.getElementById('sshRowKeyContent');
+            const rowPassphrase = document.getElementById('sshRowPassphrase');
+
+            if (authType === 'PASSWORD') {
+                if (rowPass) rowPass.style.display = 'flex';
+                if (rowKeyPath) rowKeyPath.style.display = 'none';
+                if (rowKeyContent) rowKeyContent.style.display = 'none';
+                if (rowPassphrase) rowPassphrase.style.display = 'none';
+            } else if (authType === 'KEY_FILE') {
+                if (rowPass) rowPass.style.display = 'none';
+                if (rowKeyPath) rowKeyPath.style.display = 'flex';
+                if (rowKeyContent) rowKeyContent.style.display = 'none';
+                if (rowPassphrase) rowPassphrase.style.display = 'flex';
+            } else if (authType === 'KEY_CONTENT') {
+                if (rowPass) rowPass.style.display = 'none';
+                if (rowKeyPath) rowKeyPath.style.display = 'none';
+                if (rowKeyContent) rowKeyContent.style.display = 'flex';
+                if (rowPassphrase) rowPassphrase.style.display = 'flex';
+            }
+        }
+
+        function showSshBanner(type, message) {
+            const banner = document.getElementById('sshModalStatusBanner');
+            if (!banner) return;
+            banner.className = 'ssh-status-banner ' + type;
+            banner.innerHTML = message;
+            banner.style.display = 'block';
+        }
+
+        function hideSshBanner() {
+            const banner = document.getElementById('sshModalStatusBanner');
+            if (banner) {
+                banner.style.display = 'none';
+                banner.innerHTML = '';
+            }
+        }
+
+        function openSshModal() {
+            const overlay = document.getElementById('sshModalOverlay');
+            if (!overlay) return;
+            loadSshConfig();
+            hideSshBanner();
+            overlay.classList.add('active');
+            checkSshStatus();
+        }
+
+        function closeSshModal() {
+            const overlay = document.getElementById('sshModalOverlay');
+            if (overlay) overlay.classList.remove('active');
+            // Secure memory cleanup
+            clearSshSecrets();
+        }
+
+        function clearSshSecrets() {
+            const passEl = document.getElementById('sshModalPassword');
+            const keyContentEl = document.getElementById('sshModalKeyContent');
+            const passphraseEl = document.getElementById('sshModalPassphrase');
+            if (passEl) passEl.value = '';
+            if (keyContentEl) keyContentEl.value = '';
+            if (passphraseEl) passphraseEl.value = '';
+        }
+
+        async function connectSsh() {
+            const host = document.getElementById('sshModalHost').value.trim();
+            const port = parseInt(document.getElementById('sshModalPort').value.trim(), 10) || 22;
+            const username = document.getElementById('sshModalUser').value.trim();
+            const authType = document.getElementById('sshModalAuthType').value;
+            const alias = document.getElementById('sshModalAlias').value.trim() || 'default';
+
+            const passwordInput = document.getElementById('sshModalPassword');
+            const keyPathInput = document.getElementById('sshModalKeyPath');
+            const keyContentInput = document.getElementById('sshModalKeyContent');
+            const passphraseInput = document.getElementById('sshModalPassphrase');
+
+            const password = passwordInput ? passwordInput.value : '';
+            const keyPath = keyPathInput ? keyPathInput.value.trim() : '';
+            const keyContent = keyContentInput ? keyContentInput.value : '';
+            const passphrase = passphraseInput ? passphraseInput.value : '';
+
+            if (!host) {
+                showSshBanner('error', '⚠️ Host / IP address is required.');
+                return;
+            }
+            if (!username) {
+                showSshBanner('error', '⚠️ Username is required.');
+                return;
+            }
+            if (authType === 'PASSWORD' && !password) {
+                showSshBanner('error', '⚠️ Password is required for Password Authentication.');
+                return;
+            }
+            if (authType === 'KEY_FILE' && !keyPath) {
+                showSshBanner('error', '⚠️ Private key file path is required.');
+                return;
+            }
+            if (authType === 'KEY_CONTENT' && !keyContent) {
+                showSshBanner('error', '⚠️ Inline private key content is required.');
+                return;
+            }
+
+            const connectBtn = document.getElementById('sshConnectBtn');
+            if (connectBtn) {
+                connectBtn.disabled = true;
+                connectBtn.textContent = 'Connecting...';
+            }
+            showSshBanner('info', `⏳ Connecting to ${escapeHtml(username)}@${escapeHtml(host)}:${port}...`);
+
+            const payload = {
+                host: host,
+                port: port,
+                username: username,
+                authType: authType,
+                sessionAlias: alias
+            };
+
+            if (authType === 'PASSWORD') payload.password = password;
+            if (authType === 'KEY_FILE') {
+                payload.privateKeyPath = keyPath;
+                if (passphrase) payload.passphrase = passphrase;
+            }
+            if (authType === 'KEY_CONTENT') {
+                payload.privateKeyContent = keyContent;
+                if (passphrase) payload.passphrase = passphrase;
+            }
+
+            try {
+                const resp = await fetch('/api/ssh/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                // Clear secrets from memory immediately
+                clearSshSecrets();
+
+                const data = await resp.json();
+                if (resp.ok && data.status === 'connected') {
+                    showSshBanner('success', `✓ Successfully connected to <strong>${escapeHtml(data.username)}@${escapeHtml(data.host)}:${data.port}</strong> (alias: <code>${escapeHtml(data.alias)}</code>)`);
+                    saveSshConfigNonSensitive(host, port, username, authType, alias, keyPath);
+                    updateSshStatusIndicator(true);
+                    checkSshStatus();
+                } else {
+                    showSshBanner('error', `✕ Connection Failed: ${escapeHtml(data.error || 'Unknown SSH error')}`);
+                }
+            } catch (err) {
+                clearSshSecrets();
+                showSshBanner('error', `✕ Connection Error: ${escapeHtml(err.message)}`);
+            } finally {
+                if (connectBtn) {
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = 'Connect';
+                }
+            }
+        }
+
+        async function disconnectSsh(alias) {
+            const effectiveAlias = alias || document.getElementById('sshModalAlias').value.trim() || 'default';
+            const disconnectBtn = document.getElementById('sshDisconnectBtn');
+            if (disconnectBtn) {
+                disconnectBtn.disabled = true;
+                disconnectBtn.textContent = 'Disconnecting...';
+            }
+
+            try {
+                const resp = await fetch('/api/ssh/disconnect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ alias: effectiveAlias })
+                });
+                const data = await resp.json();
+                if (data.status === 'disconnected') {
+                    showSshBanner('info', `Session <code>${escapeHtml(effectiveAlias)}</code> disconnected.`);
+                } else {
+                    showSshBanner('info', `Session <code>${escapeHtml(effectiveAlias)}</code> is not active.`);
+                }
+                checkSshStatus();
+            } catch (err) {
+                showSshBanner('error', `Disconnect error: ${escapeHtml(err.message)}`);
+            } finally {
+                if (disconnectBtn) {
+                    disconnectBtn.disabled = false;
+                    disconnectBtn.textContent = 'Disconnect';
+                }
+            }
+        }
+
+        async function checkSshStatus() {
+            try {
+                const resp = await fetch('/api/ssh/status');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const isConnected = !!data.connected;
+                updateSshStatusIndicator(isConnected);
+
+                const activeArea = document.getElementById('sshActiveSessionsArea');
+                const listEl = document.getElementById('sshActiveSessionsList');
+                const disconnectBtn = document.getElementById('sshDisconnectBtn');
+
+                if (data.sessions && data.sessions.length > 0) {
+                    if (activeArea) activeArea.style.display = 'block';
+                    if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
+                    if (listEl) {
+                        listEl.innerHTML = data.sessions.map(s => `
+                            <div class="ssh-active-item">
+                                <div>
+                                    <span style="color:var(--success);font-weight:600;">●</span>
+                                    <strong>${escapeHtml(s.username)}@${escapeHtml(s.host)}:${s.port}</strong>
+                                    <span style="opacity:0.7;">(alias: <code>${escapeHtml(s.alias)}</code>)</span>
+                                </div>
+                                <button onclick="disconnectSsh('${escapeHtml(s.alias)}')" style="background:var(--danger);color:white;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;">✕ Terminate</button>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    if (activeArea) activeArea.style.display = 'none';
+                    if (disconnectBtn) disconnectBtn.style.display = 'none';
+                }
+            } catch (e) {
+                updateSshStatusIndicator(false);
+            }
+        }
+
+        function updateSshStatusIndicator(connected) {
+            const dot = document.getElementById('sshStatusDot') || document.getElementById('sshHeaderDot');
+            if (dot) {
+                dot.className = 'ssh-status-dot ' + (connected ? 'connected' : 'disconnected');
+            }
+            const headerBtn = document.getElementById('sshHeaderBtn');
+            if (headerBtn) {
+                headerBtn.title = connected ? 'Remote SSH: Connected' : 'Remote SSH: Disconnected (Click to Connect)';
+            }
+        }
+
+        // Global ESC handler addition for SSH modal in academic view
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const overlay = document.getElementById('sshModalOverlay');
+                if (overlay && overlay.classList.contains('active')) {
+                    closeSshModal();
+                }
+            }
+        });
+
+        // Periodic SSH status check every 15s
+        setInterval(checkSshStatus, 15000);
+        checkSshStatus();
+
     </script>
+
+        <!-- Remote SSH Connection Modal (Academic Dialog) -->
+        <div id="sshModalOverlay" class="ssh-modal-overlay" onclick="if(event.target===this) closeSshModal()">
+            <div class="ssh-modal-card">
+                <div class="ssh-modal-header">
+                    <h3><span>🔌 Remote SSH Connection</span></h3>
+                    <button class="ssh-modal-close-btn" onclick="closeSshModal()" title="Close (Esc)">✕</button>
+                </div>
+                <div class="ssh-modal-body">
+                    <div class="ssh-status-banner" id="sshModalStatusBanner"></div>
+
+                    <div id="sshActiveSessionsArea" style="display:none;" class="ssh-active-sessions">
+                        <div class="ssh-active-header">
+                            <span>Active SSH Sessions</span>
+                            <button onclick="checkSshStatus()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-family:inherit;font-size:11px;">🔄 Refresh</button>
+                        </div>
+                        <div id="sshActiveSessionsList"></div>
+                    </div>
+
+                    <div class="ssh-form-row row-split">
+                        <div style="flex: 2;">
+                            <label class="ssh-form-label" for="sshModalHost">Host / IP <span class="req">*</span></label>
+                            <input type="text" id="sshModalHost" class="ssh-form-input" placeholder="e.g. 192.168.1.100 or ubuntu.example.com" autocomplete="off" />
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="ssh-form-label" for="sshModalPort">Port <span class="req">*</span></label>
+                            <input type="number" id="sshModalPort" class="ssh-form-input" value="22" autocomplete="off" />
+                        </div>
+                    </div>
+
+                    <div class="ssh-form-row row-split">
+                        <div style="flex: 1;">
+                            <label class="ssh-form-label" for="sshModalUser">Username <span class="req">*</span></label>
+                            <input type="text" id="sshModalUser" class="ssh-form-input" placeholder="e.g. ubuntu or root" autocomplete="off" />
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="ssh-form-label" for="sshModalAlias">Session Alias</label>
+                            <input type="text" id="sshModalAlias" class="ssh-form-input" value="default" autocomplete="off" />
+                        </div>
+                    </div>
+
+                    <div class="ssh-form-row">
+                        <label class="ssh-form-label" for="sshModalAuthType">Authentication Method</label>
+                        <select id="sshModalAuthType" class="ssh-form-select" onchange="onSshAuthTypeChange()">
+                            <option value="PASSWORD">Password</option>
+                            <option value="KEY_FILE">Private Key File Path</option>
+                            <option value="KEY_CONTENT">Inline Private Key</option>
+                        </select>
+                    </div>
+
+                    <!-- Password Auth Row -->
+                    <div class="ssh-form-row" id="sshRowPassword">
+                        <label class="ssh-form-label" for="sshModalPassword">Password <span class="req">*</span></label>
+                        <input type="password" id="sshModalPassword" class="ssh-form-input" placeholder="Enter remote SSH password" autocomplete="new-password" spellcheck="false" />
+                    </div>
+
+                    <!-- Key File Path Row -->
+                    <div class="ssh-form-row" id="sshRowKeyPath" style="display:none;">
+                        <label class="ssh-form-label" for="sshModalKeyPath">Private Key Path <span class="req">*</span></label>
+                        <input type="text" id="sshModalKeyPath" class="ssh-form-input" placeholder="e.g. ~/.ssh/id_rsa or /home/ubuntu/.ssh/id_ed25519" autocomplete="off" />
+                    </div>
+
+                    <!-- Inline Key Content Row -->
+                    <div class="ssh-form-row" id="sshRowKeyContent" style="display:none;">
+                        <label class="ssh-form-label" for="sshModalKeyContent">Inline Private Key PEM/OpenSSH <span class="req">*</span></label>
+                        <textarea id="sshModalKeyContent" class="ssh-form-textarea" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" autocomplete="new-password" spellcheck="false" rows="5"></textarea>
+                    </div>
+
+                    <!-- Passphrase Row (for encrypted keys) -->
+                    <div class="ssh-form-row" id="sshRowPassphrase" style="display:none;">
+                        <label class="ssh-form-label" for="sshModalPassphrase">Key Passphrase <span style="font-weight:normal;opacity:0.7;">(optional)</span></label>
+                        <input type="password" id="sshModalPassphrase" class="ssh-form-input" placeholder="Passphrase for private key (if encrypted)" autocomplete="new-password" />
+                    </div>
+                </div>
+                <div class="ssh-modal-footer">
+                    <button class="ssh-btn ssh-btn-disconnect" id="sshDisconnectBtn" onclick="disconnectSsh()" style="display:none;">Disconnect</button>
+                    <div class="ssh-footer-actions" style="margin-left:auto;">
+                        <button class="ssh-btn ssh-btn-cancel" onclick="closeSshModal()">Cancel</button>
+                        <button class="ssh-btn ssh-btn-connect" id="sshConnectBtn" onclick="connectSsh()">Connect</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
 </body>
 </html>
