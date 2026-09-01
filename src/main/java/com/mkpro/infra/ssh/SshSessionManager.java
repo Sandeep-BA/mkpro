@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,6 +22,36 @@ public class SshSessionManager {
 
     public static SshSessionManager getInstance() {
         return INSTANCE;
+    }
+
+    public static class SessionInfo {
+        private final String alias;
+        private final String host;
+        private final int port;
+        private final String username;
+        private final Instant connectedAt;
+        private final Instant lastUsedAt;
+        private final boolean connected;
+
+        public SessionInfo(String alias, String host, int port, String username,
+                           Instant connectedAt, Instant lastUsedAt, boolean connected) {
+            this.alias = alias;
+            this.host = host;
+            this.port = port;
+            this.username = username;
+            this.connectedAt = connectedAt;
+            this.lastUsedAt = lastUsedAt;
+            this.connected = connected;
+        }
+
+        public String getAlias() { return alias; }
+        public String getHost() { return host; }
+        public int getPort() { return port; }
+        public String getUsername() { return username; }
+        public String getUser() { return username; }
+        public Instant getConnectedAt() { return connectedAt; }
+        public Instant getLastUsedAt() { return lastUsedAt; }
+        public boolean isConnected() { return connected; }
     }
 
     public static class SshSessionEntry {
@@ -48,6 +77,7 @@ public class SshSessionManager {
         public String getHost() { return host; }
         public int getPort() { return port; }
         public String getUsername() { return username; }
+        public String getUser() { return username; }
         public Session getSession() { return session; }
         public Instant getConnectedAt() { return connectedAt; }
         public Instant getLastUsedAt() { return lastUsedAt; }
@@ -55,6 +85,10 @@ public class SshSessionManager {
 
         public boolean isConnected() {
             return session != null && session.isConnected();
+        }
+
+        public SessionInfo toSessionInfo() {
+            return new SessionInfo(alias, host, port, username, connectedAt, lastUsedAt, isConnected());
         }
     }
 
@@ -299,12 +333,35 @@ public class SshSessionManager {
         }
     }
 
+    public boolean hasActiveSession(String alias) {
+        SshSessionEntry entry = getSessionEntry(alias);
+        return entry != null && entry.isConnected();
+    }
+
+    public boolean hasActiveSessions() {
+        for (SshSessionEntry entry : sessions.values()) {
+            if (entry != null && entry.isConnected()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public SessionInfo getSessionInfo(String alias) {
+        SshSessionEntry entry = getSessionEntry(alias);
+        return entry != null ? entry.toSessionInfo() : null;
+    }
+
     public SshSessionEntry getSessionEntry(String alias) {
         String key = (alias == null || alias.isBlank()) ? "default" : alias.trim();
         return sessions.get(key);
     }
 
-    public List<SshSessionEntry> listSessions() {
-        return new ArrayList<>(sessions.values());
+    public List<SessionInfo> listSessions() {
+        List<SessionInfo> list = new ArrayList<>();
+        for (SshSessionEntry entry : sessions.values()) {
+            list.add(entry.toSessionInfo());
+        }
+        return list;
     }
 }

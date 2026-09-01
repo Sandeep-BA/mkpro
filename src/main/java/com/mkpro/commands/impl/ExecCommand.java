@@ -3,7 +3,7 @@ package com.mkpro.commands.impl;
 import com.mkpro.commands.Command;
 import com.mkpro.core.MkProContext;
 import com.mkpro.infra.ssh.SshSessionManager;
-import com.mkpro.tools.ShellTools;
+import com.mkpro.security.ShellExecutor;
 
 import java.util.List;
 
@@ -78,18 +78,29 @@ public class ExecCommand implements Command {
                 writer.println(ANSI_RED + "[SSH Execution Error] " + e.getMessage() + ANSI_RESET);
             }
         } else {
-            // Execute locally
+            // Execute locally fallback
             writer.println(ANSI_DIM + "[Local] $ " + command + ANSI_RESET);
             writer.flush();
             try {
-                String output = ShellTools.runCommand(command);
-                if (output != null && !output.isEmpty()) {
-                    writer.print(output);
-                    if (!output.endsWith("\n")) {
+                ShellExecutor executor = new ShellExecutor(120, 100 * 1024);
+                ShellExecutor.ExecutionResult result = executor.execute(command);
+                if (result.getStdout() != null && !result.getStdout().isEmpty()) {
+                    writer.print(result.getStdout());
+                    if (!result.getStdout().endsWith("\n")) {
                         writer.println();
                     }
                 }
-                writer.println(ANSI_GREEN + "[Local] Command completed." + ANSI_RESET);
+                if (result.getStderr() != null && !result.getStderr().isEmpty()) {
+                    writer.print(ANSI_RED + result.getStderr() + ANSI_RESET);
+                    if (!result.getStderr().endsWith("\n")) {
+                        writer.println();
+                    }
+                }
+                if (result.isSuccess()) {
+                    writer.println(ANSI_GREEN + "[Local] Exit code: 0 (" + result.getDurationMs() + "ms)" + ANSI_RESET);
+                } else {
+                    writer.println(ANSI_YELLOW + "[Local] Exit code: " + result.getExitCode() + ANSI_RESET);
+                }
             } catch (Exception e) {
                 writer.println(ANSI_RED + "[Local Execution Error] " + e.getMessage() + ANSI_RESET);
             }
