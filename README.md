@@ -1,6 +1,6 @@
 # mkpro - The AI Software Engineering Team
 
-`mkpro` is an advanced, modular CLI assistant built on the Google Agent Development Kit (ADK). It orchestrates a team of **15 specialized AI agents** to autonomously handle complex software engineering tasks, from coding and testing to security audits and cloud deployment. It supports a multi-provider backend, allowing you to mix and match local models (Ollama, Jlama) with powerful cloud models (Gemini, Bedrock, Azure, Sarvam).
+`mkpro` is an advanced, modular CLI assistant built on the Google Agent Development Kit (ADK). It orchestrates a team of **16 specialized AI agents** to autonomously handle complex software engineering tasks, from coding and testing to security audits, remote Linux infrastructure management, and cloud deployment. It supports a multi-provider backend, allowing you to mix and match local models (Ollama, Jlama) with powerful cloud models (Gemini, Bedrock, Azure, Sarvam).
 
 ## 🤖 Meet the Team
 
@@ -12,7 +12,8 @@ Your `mkpro` instance is not just a chatbot; it's a team of experts led by a Coo
 | **GoalTracker** | **Project Manager**. Keeps track of ongoing session goals, creates TODO lists for complex tasks, and maintains progress in a local MapDB store. |
 | **Coder** | **Software Engineer**. Reads and analyzes code. Leverages **Graph Memory** and **codebase search** to recall architectural patterns and context. |
 | **CodeEditor** | **Code Manipulator**. Safely applies code changes to files with a built-in diff preview and user confirmation step. Automatically creates backups using `Maker.backItUp`. |
-| **SysAdmin** | **System Operator**. Executes shell commands, manages infrastructure, and runs build tools (Maven, Gradle, npm). *Restricted from modifying code directly or managing git.* |
+| **SysAdmin** | **System Operator**. Executes local shell commands, manages local infrastructure, and runs build tools (Maven, Gradle, npm). *Restricted from modifying code directly or managing git.* |
+| **UbuntuOps** | **Persistent Remote Sandbox & SSH Specialist**. Manages persistent SSH sessions, executes remote commands, handles remote security policies, and transfers files via SFTP. |
 | **GitAgent** | **Version Control Specialist**. Stages, commits, and pushes code. Enforces semantic commit messages and appends AI session token statistics to commit history. |
 | **Tester** | **QA Engineer**. Writes unit and integration tests, runs test suites, performs browser-based E2E testing via Selenium. |
 | **DocWriter** | **Technical Writer**. Maintains `README.md`, generates Javadocs/Docstrings, and ensures documentation stays in sync with code. |
@@ -35,6 +36,7 @@ graph TD
         Coordinator -->|Delegates Task| Coder[Coder]
         Coordinator -->|Delegates Task| Tester[Tester]
         Coordinator -->|Delegates Task| SysAdmin[SysAdmin]
+        Coordinator -->|Delegates Task| UbuntuOps[UbuntuOps]
         Coordinator -->|Delegates Task| GoalTracker[GoalTracker]
         Coordinator -.->|Manages| Others[Other Agents...]
     end
@@ -42,6 +44,7 @@ graph TD
     subgraph "Execution & State"
         Coder -->|Executes| Runner[ADK Runner]
         Tester -->|Executes| Runner
+        UbuntuOps -->|Manages| SshMgr[SshSessionManager]
         Runner -->|Persists| Session[Session Memory]
         Runner -->|Records| ActionLogger[(Action Logger)]
         GoalTracker -->|Updates| CentralMem[(Central Memory)]
@@ -51,6 +54,7 @@ graph TD
         Coder -->|Uses| FileTools[File System]
         Tester -->|Uses| Selenium[Selenium Browser]
         SysAdmin -->|Uses| Shell[Shell Execution]
+        UbuntuOps -->|Uses| SshTools[SSH & SFTP Transfer]
     end
 ```
 
@@ -91,322 +95,59 @@ agents:
     
   - name: SysAdmin
     tools: [shell, file_read, file_write, safe_write, clipboard]
+
+  - name: UbuntuOps
+    tools: [ssh_exec, ssh_file_transfer, ssh_list_sessions, file_read, clipboard]
     
   - name: Tester
     tools: [file_read, file_write, safe_write, clipboard, shell, selenium]
 ```
 
-Available tool names: `file_read`, `file_write`, `safe_write`, `clipboard`, `shell`, `image`, `codebase_search`, `multi_project_search`, `mcp_scan`, `graph_memory`, `fetch_url`, `stats`, `selenium`, `scripting`, `verify_fact`.
+Available tool names: `file_read`, `file_write`, `safe_write`, `clipboard`, `shell`, `image`, `codebase_search`, `multi_project_search`, `mcp_scan`, `graph_memory`, `fetch_url`, `stats`, `selenium`, `scripting`, `verify_fact`, `ssh_exec`, `ssh_file_transfer`, `ssh_list_sessions`, `screen_capture`.
 
-YAMLs without a `tools` field fall back to name-based assignment for backward compatibility.
+## 🎓 Academic Research View & Modern UI
 
-### Goal Stimulus System
+`mkpro` features a modern UI architecture with dual-view routing and publication-grade aesthetics:
 
-The `Maker.getGoalStimulus()` method generates a dynamic **Goal Stimulus** report for agents each turn:
+- **Academic Research View (Default Route `/`)**: Serving `academic_view.html` at `http://localhost:8080/`, this default view provides a distraction-free, publication-styled workbench optimized for in-depth code reading, literature synthesis, and architectural research. Features minimalist editorial aesthetics with **EB Garamond** serif typography, on-demand slide-over file explorer (`Ctrl+B`), line-numbered manuscript inspector, multi-modal lightbox zoom (`Ctrl+V`), and 1-click response copying.
+- **Classic View (`/classic`)**: Access the traditional dashboard and terminal-style layout via `http://localhost:8080/classic`.
+- **Cross-Navigation Header Links**: Seamlessly toggle between Academic View, Classic View, Knowledge Dashboard (`/knowledge`), MapDB browser (`/db`), and Sandbox credentials.
 
-- **Prioritized Action**: FAILED > IN_PROGRESS > PENDING — agents fix errors before continuing.
-- **Effective Leaf Goals**: Only actionable tasks (no sub-goals, or all sub-goals completed) are shown.
-- **Context Optimization**: Pending list capped at 5 items to preserve token space.
+## 👁️ Modular File Inspector & Media Viewers
 
-### Markov Chain Router
+The web interface includes an advanced, feature-rich file and artifact inspection suite:
 
-A learned probabilistic model that fast-routes requests to agents **without LLM calls**:
+- **Dual-Mode Tabbed Viewer**: Instantly switch between `[ 👁️ Rendered Preview ]` and `[ 📝 Source Code ]` for Markdown and HTML documents.
+- **Integrated PDF.js Canvas Viewer**: Native client-side PDF rendering with page navigation, zoom controls, and text selection.
+- **Lightbox Image Pan/Zoom & Binary Fallbacks**: High-resolution image inspection with interactive zoom/pan capabilities and informative fallback cards for binary or unsupported artifacts.
 
-- **IntentClassifier**: Categorizes user input via keyword/regex matching (14 categories)
-- **MarkovRouter**: Transition matrix predicts P(agent | category) with confidence scoring
-- **Zero-latency routing**: When confidence ≥ 65%, bypasses the Coordinator LLM entirely
-- **Self-improving**: Trains from JSONL data on startup, learns from live usage, auto-exports on exit
-- **Transparent**: Always shows routing decision and confidence percentage
+## 🖥️ Multi-Monitor Screen Capture (`/capture`)
 
-Training pipeline:
-```
-Session usage → auto-export JSONL on exit → /train on next startup → better routing
-```
+Capture and analyze visual context directly from your desktop environments:
+- **Multi-Monitor Screenshot Engine**: Automatically discovers and captures screenshots across all active displays, saving artifacts to `.mkpro/captures/`.
+- **Interactive Chat Cards**: Rendered thumbnails in the chat stream with instant inspection.
+- **Automatic File Inspector Popup**: Opens captured images directly in the Modular File Inspector for deep visual review by vision-capable models (e.g., Gemini).
 
-### Maker Loop (Goal-Driven Supervisor)
+## ⚡ Smart Event Filtering Plugin (`/compact`)
 
-The Maker is a persistent loop supervisor that ensures tasks are **completed, not just attempted**:
+Powered by the Google ADK `SmartEventFilterPlugin`, `mkpro` maintains optimal context windows during long-running sessions:
+- **Anchor Pinning**: Automatically preserves critical reference points including Turn 0 user goal, system instructions, and pinned memory events.
+- **Tool Output Pruning & Churn Eviction**: Automatically prunes oversized tool outputs (> 2KB) and evicts stale tool churn.
+- **Interactive Slash Commands**:
+  - `/compact [turns]` — Compacts conversation history.
+  - `/compact filter` — Displays event filtering statistics.
+  - `/compact prune <chars>` — Adjusts tool output pruning threshold.
+  - `/compact churn <on|off>` — Toggles stale tool churn eviction.
 
-- **Goal tracking**: Every user request becomes a tracked goal with turn counting
-- **Per-turn stimulus**: Injects progress context into the Coordinator ("Turn 3/5, predicted next: Tester")
-- **Completion verification**: Markov model predicts P(COMPLETE | tool_sequence) from learned patterns
-- **Failure recovery**: Automatically retries failed steps (up to 3 attempts)
-- **Stall detection**: Escalates to user when turns exceed 2x average for the category
-- **Transparent reasoning**: Shows thought process for every decision (CONTINUE/RETRY/ESCALATE/COMPLETE)
-- **Self-improving**: Learns from every completed/failed goal sequence
+## 📦 Persistent Remote Sandbox & SSH Infrastructure (`UbuntuOps`)
 
-Decision flow:
-```
-Turn complete → predict completion → if P≥75%: COMPLETE
-                                   → if failed: RETRY (max 3)
-                                   → if stalled: ESCALATE to user
-                                   → else: CONTINUE (inject stimulus)
-```
-
-## 🎓 Academic Research View (`/academic`)
-
-The **Academic Research View** at `http://localhost:8080/academic` provides a distraction-free, publication-styled workbench optimized for in-depth code reading, literature synthesis, and architectural research:
-
-- **Minimalist Editorial Aesthetics**: Clean, borderless paper layout with **EB Garamond** serif typography for an authentic print/typeset reading experience.
-- **On-Demand Slide-over File Explorer**: A non-intrusive drawer accessible via the header toggle or keyboard shortcut `Ctrl+B`, keeping project navigation out of the way until needed.
-- **Line-Numbered Manuscript Inspector**: Elegant file and artifact viewer featuring line numbers, monospaced code styling, and fast scrolling for code review.
-- **Multi-Modal Lightbox Zoom**: Direct clipboard image pasting (`Ctrl+V`) into the chat stream with interactive thumbnail previews and 1-click fullscreen Lightbox zoom.
-- **1-Click Response Copying**: Quick-copy buttons on every message bubble and code block for instant extraction of notes, snippets, or summaries.
-
-## 🛡️ Safety & Security
-
-### Defense-in-Depth
-
-| Layer | Class | Approach |
-| :--- | :--- | :--- |
-| **Command Execution** | `CommandPolicy` | Allowlist-based — only explicitly permitted commands (git, mvn, npm, docker, etc.) can execute. Dangerous patterns (force push to main, recursive delete, reverse shells) are blocked even on allowed commands. |
-| **File Access** | `PathValidator` | Restricts all file operations to the project root + temp directory. Blocks path traversal (`../../`), symlink escapes, and sensitive files (.env, id_rsa, .pem, credentials.json, .aws/, .ssh/). |
-| **Shell Execution** | `ShellExecutor` | Enforces timeouts (120s default), output size limits (100KB), stderr capture, and working directory control. Kills processes that exceed limits. |
-| **Message Authentication** | `MessageAuthenticator` | HMAC-SHA256 signing for all P2P mesh messages. Unsigned messages rejected when auth is enabled. |
-| **mTLS Mesh Security** | `CertTools` | Mandatory mutual TLS for all peer-to-peer communication. Zero-downtime rotation using the **Dual-Trust** lifecycle. |
-
-### Additional Safety Mechanisms
-
-- **Automatic Backups**: `CodeEditor` creates backups before modifications (`Maker.backItUp`).
-- **Enforced Role Delegation**: `SysAdmin` cannot modify code directly — must delegate to `CodeEditor`.
-- **Configurable Policy**: Users can customize the command allowlist via OS config directories (`%APPDATA%\mkpro\command_policy.yaml` or `~/.config/mkpro/command_policy.yaml`).
-- **Manual Emergency Revocation**: Operators can immediately block compromised nodes by removing them from the whitelist file.
-
-### mTLS & Mesh Operations
-
-For detailed mTLS procedures, refer to:
-- **[mTLS Policy & Recovery](MTLS_POLICY.md)**: Standards, Emergency Revocation, and Recovery guides.
-- **[Rotation Checklist](MTLS_ROTATION_CHECKLIST.md)**: Step-by-step guide for zero-downtime certificate rotation.
-
-**The Dual-Trust Lifecycle:**
-1.  **Phase A (Expansion)**: Nodes trust both the Old and New Root CAs.
-2.  **Phase B (Rotation)**: Node identity certificates are swapped to the New CA.
-3.  **Phase C (Contraction)**: Old Root CA is removed; only the New CA is trusted.
-
-## 🚀 Key Features
-
-- **Web UI & Academic Research Workbench**: Optional browser-based interfaces (`--web` flag) with Markdown rendering, syntax highlighting, and real-time WebSocket streaming. Includes the standard chat (`/`), Academic Research View (`/academic`), MapDB browser (`/db`), and Knowledge dashboard (`/knowledge`).
-- **Modernized Platform-Aware Storage**: Data and configuration are placed in standard OS locations (`%APPDATA%` on Windows, `$XDG_*` on Linux/macOS) ensuring zero workspace root pollution.
-- **Groovy Script Engine**: Sandboxed Groovy execution for data processing. Agents use `execute_script`, `create_script`, `list_scripts` tools. Scripts persist in CentralMemory, blocked from Runtime/ProcessBuilder/Thread/networking. 30s timeout.
-- **Fact Engine**: Verified math formulas (77 with Groovy scripts) + relationship graph (151+ triples). Pre-turn injection of relevant facts, post-turn validation for conflicts. Agents use `verify_fact` tool to compute formulas or check technology relationships. Confidence-scored edges (1.0 static, 0.8 extracted, 0.9 project). See [FactEngine docs](README_fe.md).
-- **Project Fact Discovery**: `/index` scans source files for constants, dependencies, config constraints. `/index --deep` uses LLM to analyze key files for architectural patterns, formulas, and relationships. Discovered facts persist to MapDB across sessions.
-- **Knowledge → Fact Pipeline**: Knowledge Scheduler fetches docs → FactExtractor extracts structured S-P-O triples and formulas → feeds into Fact Engine graph. The system gets smarter with each knowledge refresh.
-- **Graph Memory & Visualization**: Agents store structured associative memories in a MapDB-backed graph, viewable via `/visualize`.
-- **Mesh Networking**: Multiple mkpro instances discover each other via mDNS and synchronize memory/graph states in real-time. Automatic reconnection with exponential backoff.
-- **Cross-Instance Agent Communication**: Agents can directly ask agents on peer instances for help. Architect on Instance A can query Architect on Instance B about its project. Peer handshake exchanges project info on connection.
-- **Self-Adaptive Model Resilience**: YAML-defined fallback models per agent. Health-based routing on connection failures. Non-blocking recommendations when fallback succeeds.
-- **Learned Intent Patterns**: IntentClassifier adapts to your vocabulary. TF-IDF extraction of distinctive unigrams + bigrams from training data. System gets smarter each session.
-- **Stall Prediction & Redirect**: Maker detects stall patterns from history. On stall, routes to alternative agent (load balancer with memory) rather than giving up. Max 2 redirects before wrap-up.
-- **Heuristic Completion Detection**: Maker reads response text for completion signals ("verified", "successfully", "complete") alongside model-based prediction.
-- **Session History**: Session persists across restarts (MapDB runner). `/history` shows past exchanges. Session summary shown on startup.
-- **Knowledge Scheduler**: Autonomous topic-based knowledge accumulator (`--scheduler` flag). Fetches configured sources on a schedule, analyzes with LLM agents, builds evolving topic reports. Reports searchable via TF-IDF bag-of-words embeddings (`/know <query>`). Gets smarter each cycle.
-- **Token Tracking & Analytics**: Comprehensive token tracking per session, agent, and model, viewable via `/stats`.
-- **Goal Tracking**: Never lose track of original user requests during complex, multi-step sessions.
-- **Granular Configuration**: Assign different models to different agents via `/config`.
-- **Per-Team Configurations**: Save different model setups for different teams using YAML files.
-- **Multi-Ollama Endpoints**: Route different agents to different Ollama servers. Heavy models on GPU boxes, light models locally.
-- **Multimodal Support**: Agents can analyze images (vision) and transcribe/summarize audio files natively via Gemini.
-- **Autonomous Memory**: Agents can commit insights to CentralMemory (`commit_to_memory`) and recall them later — persists across sessions.
-- **Session State Injection**: Coordinator starts each session aware of pending goals, project memory, and MCP context from prior sessions.
-- **Training Data Export**: `/export` extracts all 15 agents' sessions as JSONL for fine-tuning your own SLM.
-- **Clipboard Integration**: Paste text or images directly into the terminal or web views using `Ctrl+V`.
-- **Multi-Provider**: Seamless switching between **Ollama** (Local), **JLama** (Pure Java LLM), **Gemini** (Google), **Bedrock** (AWS), **Azure** (OpenAI), and **Sarvam**.
-- **Multi-Runner Support**: Choose between **InMemory**, **MapDB** (persistent), and **Postgres** (enterprise) execution environments.
-- **Background Jobs**: Start, monitor, and stop background processes directly from the chat.
-- **MCP Server Integration**: Connect to MCP servers for Figma design-to-code, browser automation, and more.
-- **Project Auto-Detection**: Automatically detects Android, iOS, React, Flutter, Vue, Angular, Java/Maven, and Java/Gradle projects for intelligent file placement.
-
-## ⌨️ Commands
-
-| Command | Description |
-| :--- | :--- |
-| `/config` | View and modify agent model/provider assignments |
-| `/config list` | Show all agent configurations |
-| `/config [agent] [model]` | Reassign an agent to a different model |
-| `/ollama` | Manage multiple Ollama server endpoints |
-| `/ollama add <name> <url>` | Add a new Ollama endpoint |
-| `/ollama list` | Show all active Ollama endpoints |
-| `/ollama models [name]` | Fetch models from a specific server |
-| `/ollama status` | Check connectivity of all servers |
-| `/jlama` | Manage local Jlama models (download, list, rm) |
-| `/jlama download <model>` | Download a model from HuggingFace |
-| `/jlama list` | List downloaded Jlama models |
-| `/jlama models` | Show recommended pre-quantized Jlama models |
-| `/jlama rm <model>` | Remove a downloaded local Jlama model |
-| `/team` | Swap entire team structures |
-| `/stats` | View token usage statistics |
-| `/visualize` | Visualize the graph memory |
-| `/mcp` | Manage MCP server connections |
-| `/index` | Index project files for semantic search + fact discovery |
-| `/index --deep` | Deep analysis: LLM picks key files, extracts facts/formulas/relationships |
-| `/facts` | Show Fact Engine stats (math facts, relationships, project facts) |
-| `/facts math` | List all math formulas |
-| `/facts rels` | List all relationship triples |
-| `/facts project` | Show project-discovered facts |
-| `/facts verify <key> <vars>` | Compute a formula (e.g., `/facts verify circle_area r=5`) |
-| `/facts check <s> <p> <o>` | Check a relationship (e.g., `/facts check HPA requires metrics-server`) |
-| `/facts query <subject>` | Query all relationships for a subject |
-| `/model` | Switch models |
-| `/runner` | Switch execution runner type |
-| `/network` | Manage mesh networking peers |
-| `/network connect <ip:port>` | Manually connect to a peer instance |
-| `/network peers` | List discovered peers with project info |
-| `/cert` | Show mTLS certificate details and rotation status |
-| `/config fallback <agent> <model@provider>` | Set fallback model for an agent |
-| `/config fallback default <model@provider>` | Set global fallback for all agents |
-| `/remember` | Save a project summary to persistent memory |
-| `/export` | Export chat sessions as JSONL training data |
-| `/train` | Train Markov Router from JSONL data |
-| `/train status` | Show router model stats, transition matrix, and learned patterns |
-| `/train reset` | Clear model and retrain from scratch |
-| `/train threshold <N>` | Set Markov confidence threshold (10-99%) |
-| `/history` | Show last 10 chat exchanges from session |
-| `/history N` | Show last N exchanges |
-| `/history new` | Start a fresh session |
-| `/know <query>` | Search accumulated knowledge by TF-IDF similarity |
-| `/know topics` | List all knowledge topics with summaries |
-| `/know topic <name>` | Show full report for a specific topic |
-| `/know status` | Show knowledge scheduler status |
-| `/know refresh <name>` | Force refresh a topic (or 'all') |
-| `/know add <name> <url>` | Add a new knowledge topic at runtime |
-| `/know remove <name>` | Remove a topic and its report |
-| `/know approve <name>` | Promote a discovered sub-topic to scheduled |
-| `/know dismiss <name>` | Discard a pending discovery |
-| `/scheduler` | Show Knowledge Scheduler status |
-| `/scheduler on` | Start scheduler mid-session (loads schedules.yaml) |
-| `/scheduler off` | Stop scheduler (preserves data, /know search still works) |
-| `/web` | Show web server status (port, connected clients) |
-| `/web on [port]` | Start web server mid-session |
-| `/web off` | Stop web server, disconnect all clients |
-| `/status` | Show system status, endpoints, and agent assignments |
-| `/help` | Show available commands |
-| `/exit`, `/quit` | Exit the application |
-
-## ⚙️ Dynamic Model Registry & Sync
-
-- **Dynamic Loading**: Model lists for **Gemini**, **Bedrock**, and **Azure** are loaded from `models.yaml`. Local user configurations in the platform data directory take priority over bundled defaults.
-- **Weekly Git Syncing**: Background sync pulls latest model definitions from a remote Git repository.
-- **Customizable Remote**: Set `models.remote.url` in `config.properties` to use your own manifest.
-- **Real-time Ollama Detection**: Ollama models are fetched dynamically from your local server's `/api/tags` endpoint — always reflects your current local library.
-- **Multi-Endpoint Aggregation**: Models are fetched from ALL registered Ollama endpoints. Models from remote servers appear prefixed (e.g., `gpu-box/codestral`).
-- **Per-Agent Routing**: Assign specific agents to specific Ollama servers using `model@server-name` syntax in `/config`.
-
-## 💎 Supported Gemini Models
-
-| Model | Best For |
-| :--- | :--- |
-| **gemini-3.7-flash** | Latest flagship — coding agents, agentic workflows, design adherence (Aug 2026) |
-| **gemini-3.6-flash** | Production-grade stable Flash — balanced speed and intelligence |
-| **gemini-3.5-flash-lite** | Ultra-low cost, high-speed lightweight model |
-| **gemini-3.1-pro-preview** | Frontier-class Pro — complex reasoning and architecture |
-
-## 🦙 Supported Ollama Models
-
-Models are auto-detected from your local Ollama server. Recommended models:
-
-| Model | Best For |
-| :--- | :--- |
-| **DeepSeek-Coder-V2** | Coding & Architecture |
-| **Qwen 2.5 Coder** | Code Repair & Polyglot (92+ languages) |
-| **Llama 3.3** | General Reasoning |
-| **Phi-4** | Complex Reasoning (small but capable) |
-| **Codestral** | Full-Stack Engineering |
-| **Devstral** | Fast coding agent |
-| **Command R** | Retrieval & Long Context |
-
-## ☕ Supported Jlama Models (Pure Java LLM)
-
-Jlama runs model inference directly inside the JVM without external daemons or GPU dependencies. Recommended pre-quantized models:
-
-| Model | Size | Best For |
-| :--- | :--- | :--- |
-| **tjake/Llama-3.2-1B-Instruct-JQ4** | ~700 MB | Fast responses, lightweight CPU inference |
-| **tjake/Qwen2.5-1.5B-Instruct-JQ4** | ~900 MB | Fast reasoning & multilingual support |
-| **tjake/Llama-3.2-3B-Instruct-JQ4** | ~1.8 GB | Balanced reasoning & speed |
-| **tjake/Mistral-7B-Instruct-v0.3-JQ4** | ~4.1 GB | General coding & engineering tasks |
-| **tjake/Meta-Llama-3.1-8B-Instruct-JQ4** | ~4.5 GB | Complex tasks & deep reasoning |
-| **tjake/Qwen2.5-7B-Instruct-JQ4** | ~4.2 GB | Polyglot coding & complex instructions |
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Java 21+** (Vector incubator module recommended for Jlama SIMD acceleration: `--add-modules jdk.incubator.vector`)
-- **Maven**
-- **Google Cloud API Key** (for Gemini) or **AWS Credentials** (for Bedrock) or **Ollama** / **Jlama** (for local models).
-
-### Installation
-
-#### 1. (Optional) Build and Install JLama from Source
-If building and installing the JLama project from source:
-```bash
-git clone https://github.com/redbus-labs/Jlama.git
-cd Jlama
-mvn clean install -DskipTests
-cd ..
-```
-
-#### 2. Clone and Build mkpro
-```bash
-git clone https://github.com/redbus-labs/mkpro.git
-cd mkpro
-mvn clean install
-```
-
-### Configuration
-
-Set your environment variables or configure via `config.properties` in your user config directory (`%APPDATA%\mkpro\config.properties` on Windows or `~/.config/mkpro/config.properties` on Linux/macOS):
-```bash
-# For Gemini
-export GOOGLE_API_KEY=your_google_api_key
-
-# For AWS Bedrock
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export AWS_REGION=your_region
-```
-
-### Running mkpro
-
-Launch the CLI:
-```bash
-java -jar target/mkpro-4.5.0.jar
-```
-
-With Web UI (opens browser chat at http://localhost:8080 and Academic view at http://localhost:8080/academic):
-```bash
-java -jar target/mkpro-4.5.0.jar --web
-java -jar target/mkpro-4.5.0.jar --web 9090   # custom port
-```
-
-With Knowledge Scheduler (autonomous knowledge accumulation):
-```bash
-java -jar target/mkpro-4.5.0.jar --scheduler
-java -jar target/mkpro-4.5.0.jar --web --scheduler   # both web UI + scheduler
-```
-
-Or use the native executable (Windows):
-```bash
-target/mkpro.exe
-```
-
-Or use the convenience launch scripts:
-```bash
-./mkpro-web.sh              # Web UI mode
-./mkpro-scheduler.sh        # Web UI + Knowledge Scheduler
-./mkpro-headless.sh         # Headless: Web + Scheduler + MapDB (no interactive prompts)
-./mkpro-full.sh             # With instance registry
-```
-
-On Windows:
-```batch
-mkpro-web.bat
-mkpro-scheduler.bat
-mkpro-headless.bat
-mkpro-full.bat
-```
-
-On first launch, select your execution runner (InMemory, MapDB, or Postgres). Use `/config` to set your default provider and model.
+`mkpro` features robust remote infrastructure management through the dedicated `UbuntuOps` specialist agent:
+- **Persistent `SshSessionManager`**: Manages persistent SSH sessions with automatic keep-alive, session aliasing, and multiplexing.
+- **Web UI `📦 Sandbox` Credentials Modal**: Secure credential configuration supporting Password authentication, SSH Key Files, and Inline Private Keys.
+- **AES-GCM Encryption in MapDB**: All sensitive credentials are encrypted using AES-GCM and securely stored in CentralMemory MapDB.
+- **Startup Auto-Reconnecting**: Automatically re-establishes persistent SSH sessions upon application startup.
+- **High-Speed Bidirectional SFTP**: Transfer files seamlessly between local workspaces and remote sandboxes using `ssh_file_transfer` or `/ssh transfer`.
+- **Remote Security Policies**: Enforced `RemoteCommandPolicy` and `RemotePathValidator` preventing dangerous operations (e.g., destructive deletions or root-level modifications) on remote systems.
 
 ## 🌐 REST API
 
@@ -418,7 +159,7 @@ When running with `--web`, mkpro exposes a full HTTP REST API alongside the WebS
 | :--- | :--- | :--- |
 | `POST` | `/api/chat` | Synchronous chat — send message, get full response |
 | `POST` | `/api/chat/stream` | Streaming chat via Server-Sent Events (SSE) |
-| `POST` | `/api/command` | Execute CLI commands (`/know`, `/train`, `/status`, etc.) |
+| `POST` | `/api/command` | Execute CLI commands (`/know`, `/train`, `/status`, `/ssh`, etc.) |
 | `GET` | `/api/status` | System info (version, runner, scheduler, Markov stats) |
 | `GET` | `/api/agents` | List all agents with tools, model, and provider |
 | `GET` | `/api/knowledge` | All knowledge topics as JSON |
@@ -490,6 +231,16 @@ data: {"type":"stream_end"}
 ```json
 {"output": "Knowledge Scheduler Status\n  ✓ kubernetes-security → 2026-07-20T15:30\n..."}
 ```
+
+On Windows:
+```batch
+mkpro-web.bat
+mkpro-scheduler.bat
+mkpro-headless.bat
+mkpro-full.bat
+```
+
+On first launch, select your execution runner (InMemory, MapDB, or Postgres). Use `/config` to set your default provider and model.
 
 ## 📚 Additional Documentation
 
