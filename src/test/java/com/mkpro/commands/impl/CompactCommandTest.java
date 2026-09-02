@@ -1,11 +1,14 @@
 package com.mkpro.commands.impl;
 
 import com.google.adk.runner.Runner;
+import com.mkpro.CentralMemory;
 import com.mkpro.agents.AgentManager;
 import com.mkpro.commands.CommandRegistry;
 import com.mkpro.core.MkProContext;
+import com.mkpro.core.StoreKeys;
 import com.mkpro.models.AgentConfig;
 import com.mkpro.models.Provider;
+import com.mkpro.plugins.FilterConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,5 +100,47 @@ class CompactCommandTest {
 
         registry.executeCommand("/compact 0", context);
         assertEquals(-1, context.getMaxTurns());
+    }
+
+    @Test
+    @DisplayName("Verify FilterConfig persistence in CentralMemory across subcommands")
+    void testFilterConfigPersistenceInCentralMemory() throws Exception {
+        // Test turn limits persistence
+        command.execute(new String[]{"12"}, context);
+        FilterConfig saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertEquals(12, saved.getMaxTurns());
+
+        // Test prune settings persistence
+        command.execute(new String[]{"prune", "3500"}, context);
+        saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertTrue(saved.isPruneToolOutputs());
+        assertEquals(3500, saved.getMaxToolPayloadChars());
+
+        // Test prune off persistence
+        command.execute(new String[]{"prune", "off"}, context);
+        saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertFalse(saved.isPruneToolOutputs());
+
+        // Test churn on/off persistence
+        command.execute(new String[]{"churn", "on"}, context);
+        saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertTrue(saved.isEvictStaleToolChurn());
+
+        command.execute(new String[]{"churn", "off"}, context);
+        saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertFalse(saved.isEvictStaleToolChurn());
+
+        // Test default execute persistence
+        saved.setMaxTurns(20);
+        context.setFilterConfig(saved);
+        command.execute(new String[0], context);
+        saved = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, FilterConfig.class);
+        assertNotNull(saved);
+        assertEquals(20, saved.getMaxTurns());
     }
 }
