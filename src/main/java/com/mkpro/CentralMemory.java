@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
  *   - Located in the project's .mkpro/ directory, named per-instance
  *
  * SHARED STORE (brief file lock, retry on contention):
- *   - Agent configs, goals, memories, MCP servers, Ollama servers, SSH Sandbox config
+ *   - Agent configs, goals, memories, MCP servers, Ollama servers, SSH Sandbox config, generic objects
  *   - Located in ~/Documents/mkpro/central_memory.db
  *   - Opened briefly per write operation; reads served from cache
  *
@@ -404,6 +404,12 @@ public class CentralMemory {
             });
             r.put("ssh_sandbox_config", sshStrings);
 
+            // Generic store
+            Map<String, Object> genericMap = db.hashMap("generic_store", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            Map<String, String> genericStrings = new java.util.LinkedHashMap<>();
+            genericMap.forEach((k, v) -> genericStrings.put(k, v != null ? v.toString() : "null"));
+            r.put("generic_store", genericStrings);
+
             return r;
         });
         result.putAll(shared);
@@ -688,6 +694,35 @@ public class CentralMemory {
     }
 
     // ==========================================================================
+    // GENERIC STORE — Key-Value generic object persistence
+    // ==========================================================================
+
+    @SuppressWarnings("unchecked")
+    public <T> T get(String key, Class<T> clazz) {
+        return withSharedDb(db -> {
+            Map<String, Object> genericStore = db.hashMap("generic_store", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            Object val = genericStore.get(key);
+            if (val != null && clazz.isInstance(val)) {
+                return (T) val;
+            }
+            return null;
+        });
+    }
+
+    public void put(String key, Object value) {
+        withSharedDbVoid(db -> {
+            Map<String, Object> genericStore = db.hashMap("generic_store", Serializer.STRING, Serializer.JAVA).createOrOpen();
+            if (value != null) {
+                genericStore.put(key, value);
+            } else {
+                genericStore.remove(key);
+            }
+            db.commit();
+        });
+        notifyListeners(key, value);
+    }
+
+    // ==========================================================================
     // SYNCHRONIZATION — Called by SyncEngine when remote peer pushes updates
     // ==========================================================================
 
@@ -735,6 +770,13 @@ public class CentralMemory {
                     sshMap.remove("default");
                 }
                 sshSandboxConfigCache = cfg;
+            } else {
+                Map<String, Object> genericStore = db.hashMap("generic_store", Serializer.STRING, Serializer.JAVA).createOrOpen();
+                if (value != null) {
+                    genericStore.put(key, value);
+                } else {
+                    genericStore.remove(key);
+                }
             }
             db.commit();
         });

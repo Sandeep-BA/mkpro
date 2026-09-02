@@ -457,7 +457,15 @@ public class BootstrapService {
                 p2pBus.setOnConnectHook(peerHandshake::sendHello);
             }
 
-            Runner runner = am.createRunner(context.getAgentConfigs(), "", context.getMaxTurns());
+            // Load saved FilterConfig from CentralMemory if available
+            try {
+                com.mkpro.plugins.FilterConfig savedFilterConfig = CentralMemory.getInstance().get(StoreKeys.FILTER_CONFIG, com.mkpro.plugins.FilterConfig.class);
+                if (savedFilterConfig != null) {
+                    context.setFilterConfig(savedFilterConfig);
+                }
+            } catch (Exception ignored) {}
+
+            Runner runner = am.createRunner(context.getAgentConfigs(), "", context.getFilterConfig());
             context.setRunner(runner);
 
             // Initialize Markov Router — auto-trains from datajsonl/ if available
