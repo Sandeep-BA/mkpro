@@ -4,6 +4,8 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <!-- Author: Sandeep Belgavi, Date: September 17, 2026 -->
+
     <groupId>com.mkpro</groupId>
     <artifactId>mkpro</artifactId>
     <version>4.5.1</version>
@@ -87,7 +89,7 @@
         <dependency>
             <groupId>org.apache.groovy</groupId>
             <artifactId>groovy</artifactId>
-            <version>4.0.22</version>
+            <version>4.0.33</version>
         </dependency>
 
         <!-- Jlama: Pure Java LLM Inference -->
