@@ -93,6 +93,7 @@ public class ModelRegistry {
 
     private static void setDefaultModels() {
         GEMINI_MODELS = new ArrayList<>(Arrays.asList(
+            "gemini-3.8-flash", "gemini-3.8-flash-lite",
             "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite",
             "gemini-3.1-pro-preview"
         ));
@@ -205,10 +206,43 @@ public class ModelRegistry {
         ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
         Map<String, Object> data = mapper.readValue(file.toFile(), Map.class);
         if (data != null) {
-            if (data.containsKey("gemini")) GEMINI_MODELS = (List<String>) data.get("gemini");
-            if (data.containsKey("bedrock")) BEDROCK_MODELS = (List<String>) data.get("bedrock");
+            if (data.containsKey("gemini")) {
+                List<String> loaded = (List<String>) data.get("gemini");
+                if (loaded != null) {
+                    List<String> merged = new ArrayList<>(loaded);
+                    for (String def : GEMINI_MODELS) {
+                        if (!merged.contains(def)) {
+                            merged.add(def);
+                        }
+                    }
+                    GEMINI_MODELS = merged;
+                }
+            }
+            if (data.containsKey("bedrock")) {
+                List<String> loaded = (List<String>) data.get("bedrock");
+                if (loaded != null) {
+                    List<String> merged = new ArrayList<>(loaded);
+                    for (String def : BEDROCK_MODELS) {
+                        if (!merged.contains(def)) {
+                            merged.add(def);
+                        }
+                    }
+                    BEDROCK_MODELS = merged;
+                }
+            }
             // Ollama is no longer loaded from file
-            if (data.containsKey("azure")) AZURE_MODELS = (List<String>) data.get("azure");
+            if (data.containsKey("azure")) {
+                List<String> loaded = (List<String>) data.get("azure");
+                if (loaded != null) {
+                    List<String> merged = new ArrayList<>(loaded);
+                    for (String def : AZURE_MODELS) {
+                        if (!merged.contains(def)) {
+                            merged.add(def);
+                        }
+                    }
+                    AZURE_MODELS = merged;
+                }
+            }
             logger.info("Successfully loaded models from {}", file);
         }
     }
